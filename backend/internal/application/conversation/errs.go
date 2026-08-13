@@ -39,6 +39,10 @@ var (
 	ErrDangerousMIMEType = errors.New("dangerous file type not allowed")
 	// ErrFileProcessingNotReady 文件处理尚未就绪。
 	ErrFileProcessingNotReady = errors.New("file processing not ready")
+	// ErrTranscriptRevisionConflict 表示编辑基于旧版本。
+	ErrTranscriptRevisionConflict = errors.New("transcript revision conflict")
+	// ErrTranscriptInvalidEdit 表示客户端尝试修改受保护字段或不存在的句段。
+	ErrTranscriptInvalidEdit = errors.New("invalid transcript edit")
 	// ErrFileTooLargeForFullContext 文件过大，无法全文注入。
 	ErrFileTooLargeForFullContext = errors.New("file too large for full context")
 	// ErrEmbeddingUnavailable 当前未配置可用 embedding，无法处理大文档 / RAG。

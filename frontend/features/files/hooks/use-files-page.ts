@@ -26,7 +26,7 @@ import { patchByID, replaceByID, upsertByID } from "@/shared/lib/optimistic-list
 const FILES_PAGE_SIZE = 100;
 
 type FilesMobileView = "list" | "detail";
-type FileContentTab = "preview" | "extract";
+type FileContentTab = "preview" | "extract" | "transcript";
 
 type LoadFilesOptions = {
   preferredFileID?: string | null;
@@ -95,7 +95,10 @@ type UseFilesPageResult = {
 };
 
 function normalizeContentTab(value: string | null): FileContentTab {
-  return value === "extract" ? "extract" : "preview";
+  if (value === "extract" || value === "transcript") {
+    return value;
+  }
+  return "preview";
 }
 
 export function useFilesPage(): UseFilesPageResult {
@@ -300,6 +303,7 @@ export function useFilesPage(): UseFilesPageResult {
         (item.processingStatus === "uploaded" ||
           item.processingStatus === "queued" ||
           item.processingStatus === "extracting" ||
+          item.processingStatus === "transcribing" ||
           item.processingStatus === "embedding" ||
           item.extractStatus === "processing" ||
           item.embedStatus === "processing"),
@@ -328,6 +332,22 @@ export function useFilesPage(): UseFilesPageResult {
     () => files.find((item) => item.fileID === selectedFileID) ?? null,
     [files, selectedFileID],
   );
+
+  React.useEffect(() => {
+    if (contentTab === "transcript" && (selectedFile?.fileCategory !== "audio" || selectedFile.extractStatus !== "ready")) {
+      setContentTab("preview");
+    }
+  }, [contentTab, selectedFile?.extractStatus, selectedFile?.fileCategory]);
+
+  React.useEffect(() => {
+    if (!selectedFile || selectedFile.fileCategory !== "audio" || selectedFile.processingReady || selectedFile.processingStatus === "failed") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void loadFiles({ preferredFileID: selectedFile.fileID, ensurePreferred: true, silent: true, background: true });
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [loadFiles, selectedFile]);
 
   const { preview, open, download } = useFilePreview({
     file: selectedFile,

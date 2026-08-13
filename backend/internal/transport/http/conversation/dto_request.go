@@ -89,6 +89,18 @@ type UpdateFileRequest struct {
 	RagOptOut *bool   `json:"ragOptOut,omitempty"`
 }
 
+// PatchFileTranscriptRequest 批量保存录音人工修订。
+type PatchFileTranscriptRequest struct {
+	Revision     int                                 `json:"revision" binding:"required,min=1"`
+	SpeakerNames map[string]string                   `json:"speakerNames,omitempty"`
+	Segments     []PatchFileTranscriptSegmentRequest `json:"segments,omitempty" binding:"max=5000,dive"`
+}
+
+type PatchFileTranscriptSegmentRequest struct {
+	SegmentID string `json:"segmentID" binding:"required,max=128"`
+	Text      string `json:"text" binding:"required,max=20000"`
+}
+
 // SendMessageRequest 发送消息请求。
 type SendMessageRequest struct {
 	ContentType             string                 `json:"contentType" binding:"required,oneof=text markdown image file mixed"`

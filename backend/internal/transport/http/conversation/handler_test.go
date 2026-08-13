@@ -10,11 +10,23 @@ import (
 
 	appbilling "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/billing"
 	appconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/conversation"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
 )
+
+func TestMaxUploadRequestBytesUsesAudioLimit(t *testing.T) {
+	handler := NewHandler(nil, config.NewRuntime(config.Config{
+		MaxUploadFileBytes: 20 * 1024 * 1024,
+		FileAudioMaxBytes:  500 * 1024 * 1024,
+	}))
+	want := int64(500*1024*1024 + multipartUploadOverheadBytes)
+	if got := handler.maxUploadRequestBytes(); got != want {
+		t.Fatalf("maxUploadRequestBytes() = %d, want %d", got, want)
+	}
+}
 
 func TestSafeFileContentTypeDowngradesActiveContent(t *testing.T) {
 	tests := []struct {

@@ -54,6 +54,9 @@ func TestProcessingSupportsPresentationExtractionAndRAG(t *testing.T) {
 	if !supportsRAG("presentation") {
 		t.Fatal("presentation should support RAG")
 	}
+	if !supportsExtraction("audio") || !supportsRAG("audio") {
+		t.Fatal("audio should support transcription and RAG")
+	}
 }
 
 func TestResolveProcessingExtractTimeoutAddsPDFOCRFallbackWindow(t *testing.T) {

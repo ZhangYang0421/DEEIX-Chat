@@ -16,6 +16,7 @@ import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import {
   getChatFilePolicy,
   getFileProcessingStatus,
+  retryAudioTranscription,
   uploadFile,
 } from "@/shared/api/file";
 import type { ChatFilePolicyDTO } from "@/shared/api/file.types";
@@ -90,6 +91,7 @@ export function useChatAttachments({
       item.processingStatus === "uploaded" ||
       item.processingStatus === "queued" ||
       item.processingStatus === "extracting" ||
+      item.processingStatus === "transcribing" ||
       item.processingStatus === "embedding",
     );
     if (pending.length === 0) {
@@ -342,6 +344,45 @@ export function useChatAttachments({
     }
   }, [onUploadFiles, t]);
 
+  const onRetryTranscription = React.useCallback(async (fileID: string) => {
+    if (attachmentsRef.current.some((item) => item.fileID === fileID && item.processingStatus === "queued")) {
+      return;
+    }
+    setAttachments((current) => current.map((item) => item.fileID === fileID ? {
+      ...item,
+      processingStatus: "queued",
+      processingReady: false,
+    } : item));
+    const token = await resolveAccessToken();
+    if (!token) {
+      setAttachments((current) => current.map((item) => item.fileID === fileID ? {
+        ...item,
+        processingStatus: "failed",
+        processingReady: false,
+      } : item));
+      toast.error(t("uploadSignInRequired"));
+      return;
+    }
+    try {
+      await retryAudioTranscription(token, fileID);
+      setAttachments((current) => current.map((item) => item.fileID === fileID ? {
+        ...item,
+        processingStatus: "queued",
+        processingReady: false,
+        processingErrorCode: "",
+        processingErrorMessage: "",
+      } : item));
+      toast.success(t("retryTranscriptionStarted"));
+    } catch (error) {
+      setAttachments((current) => current.map((item) => item.fileID === fileID ? {
+        ...item,
+        processingStatus: "failed",
+        processingReady: false,
+      } : item));
+      toast.error(t("retryTranscriptionFailed"), { description: resolveErrorMessage(error, t("retryLater")) });
+    }
+  }, [resolveErrorMessage, setAttachments, t]);
+
   React.useEffect(() => {
     return () => {
       for (const item of attachmentsRef.current) {
@@ -360,5 +401,6 @@ export function useChatAttachments({
     onRemoveAttachment,
     onUploadFiles,
     onCaptureScreenshot,
+    onRetryTranscription,
   };
 }

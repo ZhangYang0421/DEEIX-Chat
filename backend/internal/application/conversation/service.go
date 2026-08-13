@@ -359,6 +359,9 @@ func (s *Service) SetObjectStoreProvider(provider appstorage.Provider) {
 		if s.extractSvc != nil {
 			s.extractSvc.SetObjectStoreProvider(provider)
 		}
+		if s.processingSvc != nil {
+			s.processingSvc.SetObjectStoreProvider(provider)
+		}
 	}
 }
 

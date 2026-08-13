@@ -250,6 +250,16 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         valueUnit: "mb",
         subgroupKey: "upload_limits_override",
       },
+      {
+        namespace: "file",
+        key: "audio_max_bytes",
+        label: "MP3 size limit",
+        description: "Maximum size for one MP3 recording. The UI uses MB.",
+        type: "int",
+        placeholder: "Size limit (MB)",
+        valueUnit: "mb",
+        subgroupKey: "upload_limits_override",
+      },
     ],
   },
   {

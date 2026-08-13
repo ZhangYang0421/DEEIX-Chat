@@ -7,6 +7,7 @@ import (
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	models "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"gorm.io/gorm"
 )
 
 func (r *Repo) UpdateFileObjectProcessingState(ctx context.Context, item *domainconversation.FileObjectProcessing) error {
@@ -35,6 +36,47 @@ func (r *Repo) GetFileObjectProcessingByObjectID(ctx context.Context, fileObjID 
 	}
 	result := toFileObjectProcessingStateDomain(item)
 	return &result, nil
+}
+
+func (r *Repo) ListRecoverableAudioFileObjects(ctx context.Context, limit int) ([]domainconversation.FileObject, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+	items := make([]models.FileObject, 0)
+	if err := r.db.WithContext(ctx).
+		Where("status = ? AND file_category = ? AND processing_status IN ?", "active", "audio", []string{"uploaded", "queued", "transcribing"}).
+		Order("id ASC").
+		Limit(limit).
+		Find(&items).Error; err != nil {
+		return nil, translateError(err)
+	}
+	result := make([]domainconversation.FileObject, 0, len(items))
+	for _, item := range items {
+		result = append(result, toFileObjectDomain(item))
+	}
+	return result, nil
+}
+
+func (r *Repo) CompareAndSwapTranscriptRevision(ctx context.Context, userID uint, fileID string, expectedRevision int) (bool, error) {
+	if userID == 0 || fileID == "" || expectedRevision < 1 {
+		return false, nil
+	}
+	const processingPayloadColumn = "processing_payload_json"
+	result := r.db.WithContext(ctx).
+		Model(&models.FileObject{}).
+		Where("user_id = ? AND file_id = ? AND status = ? AND file_category = ?", userID, fileID, "active", "audio").
+		Where("COALESCE((processing_payload_json::jsonb ->> 'transcriptRevision')::int, 1) = ?", expectedRevision).
+		Updates(map[string]interface{}{
+			processingPayloadColumn: gorm.Expr(
+				"jsonb_set(COALESCE(NULLIF(processing_payload_json, ''), '{}')::jsonb, '{transcriptRevision}', to_jsonb(?::int), true)::text",
+				expectedRevision+1,
+			),
+			"updated_at": time.Now(),
+		})
+	if result.Error != nil {
+		return false, translateError(result.Error)
+	}
+	return result.RowsAffected == 1, nil
 }
 
 func (r *Repo) CloneFileObjectProcessingState(ctx context.Context, sourceFileObjID uint, targetFileObjID uint, userID uint) error {
@@ -103,7 +145,23 @@ func fileObjectProcessingUpdates(input repository.UpdateFileObjectProcessingInpu
 		updates["extractor_version"] = *input.ExtractorVersion
 	}
 	if input.ExtractedAt != nil {
-		updates["extracted_at"] = *input.ExtractedAt
+		updates["extracted_at"] = nullableTimeValue(*input.ExtractedAt)
+	}
+	if input.ProcessingPayloadJSON != nil {
+		updates["processing_payload_json"] = *input.ProcessingPayloadJSON
+	}
+	if input.ProcessingStartedAt != nil {
+		updates["processing_started_at"] = nullableTimeValue(*input.ProcessingStartedAt)
+	}
+	if input.ProcessingCompletedAt != nil {
+		updates["processing_completed_at"] = nullableTimeValue(*input.ProcessingCompletedAt)
 	}
 	return updates
+}
+
+func nullableTimeValue(value *time.Time) interface{} {
+	if value == nil {
+		return nil
+	}
+	return *value
 }

@@ -26,8 +26,10 @@ type ChatFilePolicyDTO struct {
 	AllowedMIMETypes       []string
 	ImageMaxBytes          int64
 	DocMaxBytes            int64
+	AudioMaxBytes          int64
 	EffectiveImageMaxBytes int64
 	EffectiveDocMaxBytes   int64
+	EffectiveAudioMaxBytes int64
 	FullContextMaxBytes    int64
 	FullContextMaxTokens   int
 	FullContextPDFMaxPages int

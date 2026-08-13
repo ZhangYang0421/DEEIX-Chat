@@ -16,8 +16,10 @@ const (
 )
 
 var (
-	ErrInvalidKey = errors.New("invalid object key")
-	ErrNotFound   = errors.New("object not found")
+	ErrInvalidKey    = errors.New("invalid object key")
+	ErrInvalidExpiry = errors.New("invalid presign expiry")
+	ErrNotFound      = errors.New("object not found")
+	ErrUnsupported   = errors.New("operation not supported")
 )
 
 type PutOptions struct {
@@ -36,6 +38,7 @@ type Store interface {
 	Put(ctx context.Context, key string, body io.Reader, opts PutOptions) (ObjectInfo, error)
 	Open(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, error)
 	Delete(ctx context.Context, key string) error
+	PresignGet(ctx context.Context, key string, expires time.Duration) (string, error)
 	Materialize(ctx context.Context, key string) (string, func(), error)
 }
 

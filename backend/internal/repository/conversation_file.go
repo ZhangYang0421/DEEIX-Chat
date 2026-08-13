@@ -90,6 +90,8 @@ type FileProcessingRepository interface {
 	GetActiveFileObjectByID(ctx context.Context, userID uint, fileID string) (*domainconversation.FileObject, error)
 	UpdateFileObjectProcessingState(ctx context.Context, item *domainconversation.FileObjectProcessing) error
 	GetFileObjectProcessingByObjectID(ctx context.Context, fileObjID uint) (*domainconversation.FileObjectProcessing, error)
+	ListRecoverableAudioFileObjects(ctx context.Context, limit int) ([]domainconversation.FileObject, error)
+	CompareAndSwapTranscriptRevision(ctx context.Context, userID uint, fileID string, expectedRevision int) (bool, error)
 	CloneFileObjectProcessingState(ctx context.Context, sourceFileObjID uint, targetFileObjID uint, userID uint) error
 	UpdateFileObjectProcessing(ctx context.Context, userID uint, fileID string, input UpdateFileObjectProcessingInput) error
 }
@@ -104,6 +106,9 @@ type UpdateFileObjectProcessingInput struct {
 	PageCount              *int
 	ExtractorVersion       *string
 	ExtractedAt            **time.Time
+	ProcessingPayloadJSON  *string
+	ProcessingStartedAt    **time.Time
+	ProcessingCompletedAt  **time.Time
 }
 
 // IsZero 判断是否没有任何文件处理状态更新字段。
@@ -115,7 +120,10 @@ func (input UpdateFileObjectProcessingInput) IsZero() bool {
 		input.ExtractStatus == nil &&
 		input.PageCount == nil &&
 		input.ExtractorVersion == nil &&
-		input.ExtractedAt == nil
+		input.ExtractedAt == nil &&
+		input.ProcessingPayloadJSON == nil &&
+		input.ProcessingStartedAt == nil &&
+		input.ProcessingCompletedAt == nil
 }
 
 // ConversationSettingsRepository 封装会话域设置读取能力。

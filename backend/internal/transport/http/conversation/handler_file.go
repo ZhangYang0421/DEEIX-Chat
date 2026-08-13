@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	appconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/conversation"
+	appprocessing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/processing"
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
@@ -19,7 +20,7 @@ const multipartUploadOverheadBytes = 1 << 20
 
 // UploadFile godoc
 // @Summary 上传文件
-// @Description 上传对话附件文件，统一存储并扣减用户配额（默认100MB）
+// @Description 上传对话附件文件，统一存储并扣减用户配额（默认10GB）
 // @Tags chat
 // @Accept multipart/form-data
 // @Produce json
@@ -103,11 +104,15 @@ func (h *Handler) UploadFile(c *gin.Context) {
 func (h *Handler) maxUploadRequestBytes() int64 {
 	maxUploadBytes := int64(20 * 1024 * 1024)
 	if h != nil && h.cfg != nil {
-		if configured := h.cfg.Snapshot().MaxUploadFileBytes; configured > 0 {
-			maxUploadBytes = configured
+		cfg := h.cfg.Snapshot()
+		if cfg.MaxUploadFileBytes > 0 {
+			maxUploadBytes = cfg.MaxUploadFileBytes
+		}
+		if cfg.FileAudioMaxBytes > maxUploadBytes {
+			maxUploadBytes = cfg.FileAudioMaxBytes
 		}
 	}
-	// multipart 边界和字段头会占用额外字节，预留固定开销后再交给 service 校验真实文件大小。
+	// multipart 边界和字段头会占用额外字节，预留固定开销后再交给 service 按文件类型校验真实大小。
 	return maxUploadBytes + multipartUploadOverheadBytes
 }
 
@@ -168,6 +173,66 @@ func (h *Handler) GetFileProcessingStatus(c *gin.Context) {
 		return
 	}
 	response.Success(c, toFileProcessingStatusResponse(result))
+}
+
+func (h *Handler) RetryAudioTranscription(c *gin.Context) {
+	userID := middleware.MustUserID(c)
+	fileID := strings.TrimSpace(c.Param("file_id"))
+	if fileID == "" {
+		response.Error(c, http.StatusBadRequest, "invalid file id")
+		return
+	}
+	if err := h.service.RetryAudioTranscription(c.Request.Context(), userID, fileID); err != nil {
+		switch {
+		case errors.Is(err, appconversation.ErrFileNotFound):
+			response.Error(c, http.StatusNotFound, "file not found")
+		case errors.Is(err, appprocessing.ErrAudioRetryNotAllowed):
+			response.ErrorWithCode(c, http.StatusConflict, "transcription_retry_not_allowed", "audio transcription retry not allowed")
+		default:
+			response.Error(c, http.StatusInternalServerError, "retry audio transcription failed")
+		}
+		return
+	}
+	response.Success(c, gin.H{"fileID": fileID, "processingStatus": "queued"})
+}
+
+// GetFileTranscript returns the structured audio transcript.
+func (h *Handler) GetFileTranscript(c *gin.Context) {
+	userID := middleware.MustUserID(c)
+	fileID := strings.TrimSpace(c.Param("file_id"))
+	if fileID == "" { response.Error(c, http.StatusBadRequest, "invalid file id"); return }
+	result, err := h.service.GetFileTranscript(c.Request.Context(), userID, fileID)
+	if err != nil {
+		switch {
+		case errors.Is(err, appconversation.ErrFileNotFound): response.Error(c, http.StatusNotFound, "file not found")
+		case errors.Is(err, appconversation.ErrFileProcessingNotReady): response.ErrorWithCode(c, http.StatusConflict, "transcript_not_ready", "transcript not ready")
+		default: response.Error(c, http.StatusInternalServerError, "get transcript failed")
+		}
+		return
+	}
+	response.Success(c, toTranscriptResponse(result))
+}
+
+// PatchFileTranscript saves validated speaker-name and sentence edits.
+func (h *Handler) PatchFileTranscript(c *gin.Context) {
+	userID := middleware.MustUserID(c)
+	fileID := strings.TrimSpace(c.Param("file_id"))
+	if fileID == "" { response.Error(c, http.StatusBadRequest, "invalid file id"); return }
+	var req PatchFileTranscriptRequest
+	if err := c.ShouldBindJSON(&req); err != nil { response.InvalidRequestBody(c, err); return }
+	patch := appconversation.TranscriptPatch{Revision:req.Revision, SpeakerNames:req.SpeakerNames}
+	for _, segment := range req.Segments { patch.Segments = append(patch.Segments, appconversation.TranscriptSegmentPatch{SegmentID:segment.SegmentID, Text:segment.Text}) }
+	result, err := h.service.PatchFileTranscript(c.Request.Context(), userID, fileID, patch)
+	if err != nil {
+		switch {
+		case errors.Is(err, appconversation.ErrFileNotFound): response.Error(c, http.StatusNotFound, "file not found")
+		case errors.Is(err, appconversation.ErrTranscriptRevisionConflict): response.ErrorWithCode(c, http.StatusConflict, "transcript_revision_conflict", "transcript revision conflict")
+		case errors.Is(err, appconversation.ErrTranscriptInvalidEdit): response.ErrorWithCode(c, http.StatusBadRequest, "invalid_transcript_edit", "invalid transcript edit")
+		default: response.Error(c, http.StatusInternalServerError, "patch transcript failed")
+		}
+		return
+	}
+	response.Success(c, toTranscriptResponse(result))
 }
 
 // GetFileExtract 获取文件提取文本。

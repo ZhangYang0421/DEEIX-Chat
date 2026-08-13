@@ -86,6 +86,14 @@ func (s *LocalStore) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+func (s *LocalStore) PresignGet(ctx context.Context, key string, expires time.Duration) (string, error) {
+	_ = ctx
+	if expires <= 0 {
+		return "", ErrInvalidExpiry
+	}
+	return "", ErrUnsupported
+}
+
 func (s *LocalStore) Materialize(ctx context.Context, key string) (string, func(), error) {
 	_ = ctx
 	path, err := s.resolve(key)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -15,6 +16,7 @@ import (
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	infraembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/embedding"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/funasr"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"go.uber.org/zap"
 )
@@ -152,17 +154,11 @@ func (s *Service) ProcessFile(ctx context.Context, fileObj domainconversation.Fi
 		return err
 	}
 
-	text, err := s.loadSourceText(ctx, fileObj)
+	chunks, err := s.chunksForFile(ctx, fileObj, cfg)
 	if err != nil {
 		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, "failed", "无法提取文本")
 		return err
 	}
-	if strings.TrimSpace(text) == "" {
-		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, "failed", "无法提取文本")
-		return fmt.Errorf("no extractable text in file %s", fileObj.FileID)
-	}
-
-	chunks := infraembedding.ChunkText(text, cfg.EmbedChunkSizeTokens, cfg.EmbedChunkOverlapTokens)
 	if len(chunks) == 0 {
 		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, "failed", "分片结果为空")
 		return nil
@@ -232,6 +228,37 @@ func (s *Service) WaitReady(ctx context.Context, userID uint, fileID string, tim
 		}
 	}
 	return false
+}
+
+func (s *Service) chunksForFile(ctx context.Context, fileObj domainconversation.FileObject, cfg config.Config) ([]string, error) {
+	if strings.EqualFold(strings.TrimSpace(fileObj.FileCategory), "audio") && s.repo != nil && s.extractSvc != nil {
+		processing, err := s.repo.GetFileObjectProcessingByObjectID(ctx, fileObj.ID)
+		if err == nil && processing != nil {
+			var payload struct {
+				TranscriptJSONPath string `json:"transcriptJSONPath"`
+			}
+			if json.Unmarshal([]byte(processing.PayloadJSON), &payload) == nil && strings.TrimSpace(payload.TranscriptJSONPath) != "" {
+				raw, readErr := s.extractSvc.ReadExtractedText(ctx, payload.TranscriptJSONPath)
+				if readErr == nil {
+					var doc funasr.TranscriptDocument
+					if json.Unmarshal([]byte(raw), &doc) == nil {
+						chunks := funasr.BuildTimeWindowChunks(&doc, 2*time.Minute, 15*time.Second)
+						if len(chunks) > 0 {
+							return chunks, nil
+						}
+					}
+				}
+			}
+		}
+	}
+	text, err := s.loadSourceText(ctx, fileObj)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(text) == "" {
+		return nil, fmt.Errorf("no extractable text in file %s", fileObj.FileID)
+	}
+	return infraembedding.ChunkText(text, cfg.EmbedChunkSizeTokens, cfg.EmbedChunkOverlapTokens), nil
 }
 
 func (s *Service) loadSourceText(ctx context.Context, fileObj domainconversation.FileObject) (string, error) {
@@ -419,6 +446,8 @@ func supportsEmbeddingSource(fileObj domainconversation.FileObject, cfg config.C
 	switch strings.ToLower(strings.TrimSpace(fileObj.FileCategory)) {
 	case "video":
 		return false
+	case "audio":
+		return strings.TrimSpace(fileObj.ExtractStoragePath) != "" && strings.EqualFold(strings.TrimSpace(fileObj.ExtractStatus), "ready")
 	case "image":
 		return cfg.ExtractImageOCREnabled
 	}

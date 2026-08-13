@@ -2,6 +2,7 @@ package processing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,8 +10,10 @@ import (
 
 	appembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/extraction"
+	appstorage "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/objectstorage"
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/funasr"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"go.uber.org/zap"
 )
@@ -28,6 +31,8 @@ const (
 var (
 	// ErrFileProcessingFailed 表示文件处理失败。
 	ErrFileProcessingFailed = errors.New("file processing failed")
+	// ErrAudioRetryNotAllowed 表示当前录音状态不允许手动重试。
+	ErrAudioRetryNotAllowed = errors.New("audio transcription retry not allowed")
 )
 
 // FileProcessingStatusDTO 文件处理状态响应数据。
@@ -69,6 +74,8 @@ type Service struct {
 	cache            repository.FileProcessingQueueRepository
 	extractSvc       *extraction.Service
 	embeddingSvc     *appembedding.Service
+	storeProvider    appstorage.Provider
+	transcriber      AudioTranscriber
 	logger           *zap.Logger
 	extractorVersion string
 }
@@ -105,8 +112,32 @@ func NewServiceWithRuntime(
 		cache:            cache,
 		extractSvc:       extractSvc,
 		embeddingSvc:     embeddingSvc,
+		storeProvider:    appstorage.NewRuntimeProvider(cfg, nil),
 		logger:           logger,
 		extractorVersion: strings.TrimSpace(extractorVersion),
+	}
+}
+
+// AudioTranscriber 定义文件处理流水线使用的最小 Fun-ASR 能力。
+type AudioTranscriber interface {
+	Submit(ctx context.Context, in funasr.SubmitInput) (*funasr.SubmitResult, error)
+	GetTask(ctx context.Context, taskID string) (*funasr.TaskStatus, error)
+	DownloadJSON(ctx context.Context, url string) (json.RawMessage, error)
+	Configured() bool
+	Model() string
+}
+
+// SetObjectStoreProvider 注入用于预签名和持久化转写产物的对象存储。
+func (s *Service) SetObjectStoreProvider(provider appstorage.Provider) {
+	if s != nil && provider != nil {
+		s.storeProvider = provider
+	}
+}
+
+// SetAudioTranscriber 注入 Fun-ASR 客户端。
+func (s *Service) SetAudioTranscriber(client AudioTranscriber) {
+	if s != nil {
+		s.transcriber = client
 	}
 }
 
@@ -119,6 +150,7 @@ func (s *Service) StartBackgroundWorkers(ctx context.Context) {
 	if err := s.cache.InitFileProcessingStream(ctx); err != nil && s.logger != nil {
 		s.logger.Warn("create_file_processing_group_failed", zap.Error(err))
 	}
+	s.recoverAudioProcessing(ctx)
 	go s.runFileProcessingWorker(ctx, consumerName)
 }
 
@@ -172,10 +204,29 @@ func (s *Service) InitializeUploadedFile(ctx context.Context, fileObj *domaincon
 	processingStatus := "queued"
 	processingReady := false
 	extractStatus := "none"
+	processingStartedAt := &now
+	if fileObj.FileCategory == "audio" {
+		extractStatus = "processing"
+		processingStartedAt = nil
+	}
+	var initialPayloadJSON *string
+	if fileObj.FileCategory == "audio" {
+		payload, marshalErr := json.Marshal(AudioProcessingPayload{
+			Version:  1,
+			Provider: "dashscope",
+			Model:    funasr.DefaultModel,
+			Stage:    "uploaded",
+		})
+		if marshalErr != nil {
+			return marshalErr
+		}
+		initialPayloadJSON = stringPtr(string(payload))
+	}
 	if err := s.repo.UpdateFileObjectProcessing(ctx, fileObj.UserID, fileObj.FileID, repository.UpdateFileObjectProcessingInput{
-		ProcessingStatus: &processingStatus,
-		ProcessingReady:  &processingReady,
-		ExtractStatus:    &extractStatus,
+		ProcessingStatus:      &processingStatus,
+		ProcessingReady:       &processingReady,
+		ExtractStatus:         &extractStatus,
+		ProcessingPayloadJSON: initialPayloadJSON,
 	}); err != nil {
 		return err
 	}
@@ -185,9 +236,15 @@ func (s *Service) InitializeUploadedFile(ctx context.Context, fileObj *domaincon
 		DetectedMIME:     fileObj.DetectedMIME,
 		FileCategory:     fileObj.FileCategory,
 		ProcessingStatus: "queued",
-		ExtractStatus:    "none",
+		ExtractStatus:    extractStatus,
 		ExtractorVersion: s.version(),
-		StartedAt:        &now,
+		PayloadJSON: func() string {
+			if initialPayloadJSON != nil {
+				return *initialPayloadJSON
+			}
+			return ""
+		}(),
+		StartedAt: processingStartedAt,
 	}); err != nil {
 		return err
 	}
@@ -199,6 +256,9 @@ func (s *Service) ProcessFile(ctx context.Context, userID uint, fileID string) e
 	fileObj, err := s.repo.GetActiveFileObjectByID(ctx, userID, fileID)
 	if err != nil || fileObj == nil {
 		return err
+	}
+	if strings.EqualFold(strings.TrimSpace(fileObj.FileCategory), "audio") {
+		return s.processAudioFile(ctx, fileObj)
 	}
 	if fileObj.FileCategory == "image" && !s.snapshot().ExtractImageOCREnabled {
 		return nil
@@ -517,10 +577,24 @@ func (s *Service) handleProcessingMessage(ctx context.Context, msg repository.Fi
 
 	err := s.ProcessFile(ctx, msg.UserID, msg.FileID)
 	if err != nil {
-		if ctx.Err() != nil {
+		fileObj, lookupErr := s.repo.GetActiveFileObjectByID(ctx, msg.UserID, msg.FileID)
+		if lookupErr == nil && fileObj != nil && strings.EqualFold(strings.TrimSpace(fileObj.FileCategory), "audio") {
+			if ctx.Err() != nil {
+				_ = s.cache.AckFileProcessingMessage(ctx, msg.ID)
+				_ = s.cache.DeleteFileProcessingMessage(ctx, msg.ID)
+				return
+			}
+			// Fun-ASR 第一版只允许手动重试；失败即确认当前队列消息，避免继承文档流水线的自动重试。
+			_ = s.cache.SendFileProcessingToDLQ(ctx, msg.UserID, msg.FileID, msg.Retry, err.Error())
+			if fileObj.ProcessingStatus != "failed" {
+				_ = s.markFileProcessingFailed(ctx, fileObj, audioErrorCode(err), audioErrorMessage(err))
+			}
+			_ = s.cache.AckFileProcessingMessage(ctx, msg.ID)
+			_ = s.cache.DeleteFileProcessingMessage(ctx, msg.ID)
 			return
-		}
-		if msg.Retry < fileProcessingMaxRetries {
+		} else if ctx.Err() != nil {
+			return
+		} else if msg.Retry < fileProcessingMaxRetries {
 			_ = s.enqueueFileProcessing(ctx, msg.UserID, msg.FileID, msg.Retry+1, err.Error())
 		} else {
 			_ = s.cache.SendFileProcessingToDLQ(ctx, msg.UserID, msg.FileID, msg.Retry, err.Error())
@@ -598,6 +672,8 @@ func (s *Service) markFileProcessingFailed(ctx context.Context, fileObj *domainc
 		ErrorCode:        code,
 		ErrorMessage:     truncateError(message, 255),
 		ExtractorVersion: s.version(),
+		PayloadJSON:      fileObj.ProcessingPayloadJSON,
+		StartedAt:        fileObj.ProcessingStartedAt,
 		CompletedAt:      &now,
 	}); err != nil {
 		return err
@@ -612,6 +688,9 @@ func (s *Service) markFileProcessingFailed(ctx context.Context, fileObj *domainc
 		ProcessingErrorCode:    &code,
 		ProcessingErrorMessage: &processingErrorMessage,
 		ExtractStatus:          &extractStatus,
+		ProcessingPayloadJSON:  stringPtr(fileObj.ProcessingPayloadJSON),
+		ProcessingStartedAt:    timePtr(fileObj.ProcessingStartedAt),
+		ProcessingCompletedAt:  timePtr(&now),
 	})
 }
 
@@ -1049,7 +1128,7 @@ func truncateError(message string, limit int) string {
 
 func supportsExtraction(category string) bool {
 	switch category {
-	case "pdf", "word", "presentation", "excel", "text", "image":
+	case "pdf", "word", "presentation", "excel", "text", "image", "audio":
 		return true
 	default:
 		return false
@@ -1058,7 +1137,7 @@ func supportsExtraction(category string) bool {
 
 func supportsRAG(category string) bool {
 	switch category {
-	case "pdf", "word", "presentation", "excel", "text", "image":
+	case "pdf", "word", "presentation", "excel", "text", "image", "audio":
 		return true
 	default:
 		return false

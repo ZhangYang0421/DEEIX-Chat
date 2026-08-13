@@ -12,6 +12,7 @@ import (
 
 const (
 	fileCategoryImage        = "image"
+	fileCategoryAudio        = "audio"
 	fileCategoryVideo        = "video"
 	fileCategoryPDF          = "pdf"
 	fileCategoryWord         = "word"
@@ -52,6 +53,8 @@ func normalizeDetectedMIME(detected string, fileName string) string {
 		return "text/yaml"
 	case "toml":
 		return "application/toml"
+	case "mp3":
+		return "audio/mpeg"
 	}
 	if ext != "" && isTextMIMEForEmbed("", "sample."+ext) {
 		return "text/plain"
@@ -118,6 +121,8 @@ func inferFileCategory(mimeType string, fileName string) string {
 	switch {
 	case strings.HasPrefix(mime, "image/"):
 		return fileCategoryImage
+	case strings.HasPrefix(mime, "audio/") && ext == "mp3":
+		return fileCategoryAudio
 	case strings.HasPrefix(mime, "video/"):
 		return fileCategoryVideo
 	case mime == "application/pdf" || ext == "pdf":
@@ -158,6 +163,9 @@ func isAllowedMIME(mimeType string, cfg config.Config) bool {
 }
 
 func maxBytesForCategory(category string, cfg config.Config) int64 {
+	if category == fileCategoryAudio {
+		return cfg.FileAudioMaxBytes
+	}
 	if category == fileCategoryImage {
 		return cfg.FileImageMaxBytes
 	}
@@ -173,7 +181,7 @@ func supportsInlineExtraction(category string) bool {
 
 func supportsExtraction(category string) bool {
 	switch category {
-	case fileCategoryPDF, fileCategoryWord, fileCategoryPresentation, fileCategoryExcel, fileCategoryText:
+	case fileCategoryPDF, fileCategoryWord, fileCategoryPresentation, fileCategoryExcel, fileCategoryText, fileCategoryAudio:
 		return true
 	default:
 		return false
@@ -182,7 +190,7 @@ func supportsExtraction(category string) bool {
 
 func supportsRAG(category string) bool {
 	switch category {
-	case fileCategoryPDF, fileCategoryWord, fileCategoryPresentation, fileCategoryExcel, fileCategoryText, fileCategoryImage:
+	case fileCategoryPDF, fileCategoryWord, fileCategoryPresentation, fileCategoryExcel, fileCategoryText, fileCategoryImage, fileCategoryAudio:
 		return true
 	default:
 		return false
@@ -190,11 +198,12 @@ func supportsRAG(category string) bool {
 }
 
 type chatFileCapability struct {
-	RAGAvailable           bool
-	RAGAvailabilityReason  string
-	CapabilityMode         string
-	EffectiveImageMaxBytes int64
-	EffectiveDocMaxBytes   int64
+	RAGAvailable            bool
+	RAGAvailabilityReason   string
+	CapabilityMode          string
+	EffectiveImageMaxBytes  int64
+	EffectiveDocMaxBytes    int64
+	EffectiveAudioMaxBytes  int64
 }
 
 func minPositiveInt64(values ...int64) int64 {
@@ -224,6 +233,7 @@ func (s *Service) resolveChatFileCapability(ctx context.Context) chatFileCapabil
 	capability := chatFileCapability{
 		EffectiveImageMaxBytes: minPositiveInt64(cfg.MaxUploadFileBytes, cfg.FileImageMaxBytes),
 		EffectiveDocMaxBytes:   minPositiveInt64(cfg.MaxUploadFileBytes, cfg.FileDocMaxBytes),
+		EffectiveAudioMaxBytes: cfg.FileAudioMaxBytes,
 	}
 
 	ragAvailable, reason := s.embeddingSvc.Available(ctx)

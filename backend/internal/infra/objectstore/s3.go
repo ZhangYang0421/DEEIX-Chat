@@ -31,9 +31,10 @@ type S3Config struct {
 }
 
 type S3Store struct {
-	client *s3.Client
-	bucket string
-	prefix string
+	client    *s3.Client
+	presigner *s3.PresignClient
+	bucket    string
+	prefix    string
 }
 
 func NewS3(ctx context.Context, cfg S3Config) (*S3Store, error) {
@@ -66,7 +67,12 @@ func NewS3(ctx context.Context, cfg S3Config) (*S3Store, error) {
 		}
 		o.UsePathStyle = cfg.ForcePathStyle
 	})
-	return &S3Store{client: client, bucket: bucket, prefix: normalizeKey(cfg.Prefix)}, nil
+	return &S3Store{
+		client:    client,
+		presigner: s3.NewPresignClient(client),
+		bucket:    bucket,
+		prefix:    normalizeKey(cfg.Prefix),
+	}, nil
 }
 
 func (s *S3Store) Put(ctx context.Context, key string, body io.Reader, opts PutOptions) (ObjectInfo, error) {
@@ -146,6 +152,34 @@ func (s *S3Store) Delete(ctx context.Context, key string) error {
 	platformtracing.RecordError(span, err)
 	span.End()
 	return err
+}
+
+func (s *S3Store) PresignGet(ctx context.Context, key string, expires time.Duration) (string, error) {
+	normalizedKey := normalizeKey(key)
+	if normalizedKey == "" {
+		return "", ErrInvalidKey
+	}
+	if expires <= 0 {
+		return "", ErrInvalidExpiry
+	}
+	if s == nil || s.presigner == nil || strings.TrimSpace(s.bucket) == "" {
+		return "", fmt.Errorf("s3 presigner is not configured")
+	}
+	ctx, span := s.startSpan(ctx, "objectstore.s3.presign_get",
+		attribute.Int64("objectstore.presign_expiry_seconds", int64(expires/time.Second)),
+	)
+	result, err := s.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(s.objectKey(normalizedKey)),
+	}, func(options *s3.PresignOptions) {
+		options.Expires = expires
+	})
+	platformtracing.RecordError(span, err)
+	span.End()
+	if err != nil {
+		return "", err
+	}
+	return result.URL, nil
 }
 
 func (s *S3Store) startSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {

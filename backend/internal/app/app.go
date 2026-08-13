@@ -36,6 +36,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	moderationclient "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/contentmoderation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/embedding"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/funasr"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/geoip"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/identityprovider"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
@@ -78,6 +79,7 @@ import (
 	skillhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/skill"
 	userhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/user"
 	usersettingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/usersettings"
+	sharedsecurity "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	"go.uber.org/zap"
@@ -275,6 +277,21 @@ func NewApp() (*App, error) {
 	memoryService.SetEmbeddingProvider(embeddingService)
 	settingsHandler.SetEmbeddingService(embeddingService)
 	processingService := appprocessing.NewServiceWithRuntime(runtimeCfg, conversationRepo, conversationCache, extractionService, embeddingService, log, appprocessing.DefaultExtractorVersion)
+	processingService.SetObjectStoreProvider(objectStoreProvider)
+	dashScopePolicy := runtimeCfg.Snapshot().StrictOutboundPolicy()
+	if trustedPolicy, policyErr := dashScopePolicy.WithTrustedHTTPURLs(runtimeCfg.Snapshot().DashScopeBaseURL); policyErr == nil {
+		dashScopePolicy = trustedPolicy
+	} else {
+		return nil, fmt.Errorf("build DashScope outbound policy: %w", policyErr)
+	}
+	processingService.SetAudioTranscriber(funasr.New(funasr.Config{
+		APIKey:         runtimeCfg.Snapshot().DashScopeAPIKey,
+		BaseURL:        runtimeCfg.Snapshot().DashScopeBaseURL,
+		HTTPClient:     sharedsecurity.NewOutboundHTTPClient(dashScopePolicy, 2*time.Minute),
+		OutboundPolicy: func(rawURL string) error {
+			return sharedsecurity.ValidateOutboundHTTPURL(rawURL, dashScopePolicy)
+		},
+	}))
 	ragService := apprag.NewServiceWithRuntime(runtimeCfg, conversationRepo, conversationCache, embedClient)
 	conversationService := conversation.NewServiceWithRuntime(
 		runtimeCfg,

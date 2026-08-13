@@ -9,6 +9,18 @@ import (
 	sharedsecurity "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 )
 
+func TestLoadReadsDashScopeEnvironment(t *testing.T) {
+	cleanupConfigEnv(t)
+	chdir(t, t.TempDir())
+	t.Setenv("DASHSCOPE_API_KEY", "test-key")
+	t.Setenv("DASHSCOPE_BASE_URL", "https://dashscope.example.test/api/v1")
+
+	cfg := Load()
+	if cfg.DashScopeAPIKey != "test-key" || cfg.DashScopeBaseURL != "https://dashscope.example.test/api/v1" {
+		t.Fatalf("unexpected DashScope config: key=%q base=%q", cfg.DashScopeAPIKey, cfg.DashScopeBaseURL)
+	}
+}
+
 func TestLoadDefaultsUseBootstrapAdmin(t *testing.T) {
 	cleanupConfigEnv(t)
 	chdir(t, t.TempDir())
@@ -382,6 +394,8 @@ func cleanupConfigEnv(t *testing.T) {
 	t.Helper()
 	keys := []string{
 		"CONFIG_FILE",
+		"DASHSCOPE_API_KEY",
+		"DASHSCOPE_BASE_URL",
 		"APP_ENV",
 		"FRONTEND_DIST_DIR",
 		"STORAGE_ROOT_DIR",

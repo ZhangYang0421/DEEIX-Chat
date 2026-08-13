@@ -58,6 +58,23 @@ export function resolveFileProcessingBadge(
     };
   }
 
+  if (file.fileCategory === "audio" && file.processingStatus === "ready") {
+    return {
+      label: translateFileProcessing(translate, "ready", "Ready"),
+      tone: "success",
+      detail: file.embedStatus === "ready" || file.ragReady
+        ? translateFileProcessing(translate, "readyRagDetail", "File is ready and supports smart retrieval (RAG).")
+        : translateFileProcessing(translate, "readyFullContextDetail", "Transcription is complete."),
+    };
+  }
+  if (file.fileCategory === "audio") {
+    return {
+      label: translateFileProcessing(translate, "transcribing", "Transcribing"),
+      tone: "info",
+      detail: translateFileProcessing(translate, "transcribingDetail", "The recording is being transcribed. You can send it after transcription is complete."),
+    };
+  }
+
   switch (file.processingStatus) {
     case "uploaded":
       return {
@@ -80,6 +97,12 @@ export function resolveFileProcessingBadge(
         detail: file.ocrUsed
           ? translateFileProcessing(translate, "ocrDetail", "OCR is recognizing and extracting text.")
           : translateFileProcessing(translate, "extractingDetail", "Extracting text content from the file."),
+      };
+    case "transcribing":
+      return {
+        label: translateFileProcessing(translate, "transcribing", "Transcribing"),
+        tone: "info",
+        detail: translateFileProcessing(translate, "transcribingDetail", "The recording is being transcribed. You can send it after transcription is complete."),
       };
     case "embedding":
       return {

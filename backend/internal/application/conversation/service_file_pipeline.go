@@ -88,8 +88,10 @@ func (s *Service) GetChatFilePolicy(ctx context.Context, userID uint) (*ChatFile
 		AllowedMIMETypes:       sortedAllowedMIMETypes(cfg.FileAllowedMIMETypes),
 		ImageMaxBytes:          cfg.FileImageMaxBytes,
 		DocMaxBytes:            cfg.FileDocMaxBytes,
+		AudioMaxBytes:          cfg.FileAudioMaxBytes,
 		EffectiveImageMaxBytes: capability.EffectiveImageMaxBytes,
 		EffectiveDocMaxBytes:   capability.EffectiveDocMaxBytes,
+		EffectiveAudioMaxBytes: capability.EffectiveAudioMaxBytes,
 		FullContextMaxBytes:    cfg.FileFullContextMaxBytes,
 		FullContextMaxTokens:   cfg.FileFullContextMaxTokens,
 		FullContextPDFMaxPages: cfg.FileFullContextPDFMaxPages,
@@ -106,6 +108,18 @@ func (s *Service) GetFileProcessingStatus(ctx context.Context, userID uint, file
 		return nil, ErrFileNotFound
 	}
 	return result, err
+}
+
+// RetryAudioTranscription 重新提交失败的录音转写。
+func (s *Service) RetryAudioTranscription(ctx context.Context, userID uint, fileID string) error {
+	if s == nil || s.processingSvc == nil {
+		return appprocessing.ErrAudioRetryNotAllowed
+	}
+	err := s.processingSvc.RetryAudioTranscription(ctx, userID, fileID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return ErrFileNotFound
+	}
+	return err
 }
 
 func (s *Service) resolveAttachments(

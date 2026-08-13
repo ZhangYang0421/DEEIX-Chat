@@ -362,6 +362,8 @@ type Config struct {
 	StorageS3AccessKeyID         string
 	StorageS3SecretAccessKey     string
 	StorageS3ForcePathStyle      bool
+	DashScopeAPIKey              string
+	DashScopeBaseURL             string
 	AdminUsername                string
 	AdminDisplayName             string
 	GeoIPProvider                string
@@ -433,6 +435,7 @@ type Config struct {
 	FileFullContextMaxTokens          int    // 文本文件全文注入阈值（token）
 	FileImageMaxBytes                 int64  // 图片单文件上限（字节）
 	FileDocMaxBytes                   int64  // 文档单文件上限（字节）
+	FileAudioMaxBytes                 int64  // MP3 音频单文件上限（字节）
 	FileFullContextPDFMaxPages        int    // PDF Full Context 页数上限，超出走 RAG
 	FileAllowedMIMETypes              string // 白名单 MIME 类型（逗号分隔）
 	ExtractEngine                     string // 提取主引擎枚举
@@ -597,6 +600,8 @@ func Load() Config {
 		StorageS3AccessKeyID:         envOr("STORAGE_S3_ACCESS_KEY_ID", yc.Storage.S3.AccessKeyID, ""),
 		StorageS3SecretAccessKey:     envOr("STORAGE_S3_SECRET_ACCESS_KEY", yc.Storage.S3.SecretAccessKey, ""),
 		StorageS3ForcePathStyle:      envOrBoolPtr("STORAGE_S3_FORCE_PATH_STYLE", yc.Storage.S3.ForcePathStyle, true),
+		DashScopeAPIKey:              envOr("DASHSCOPE_API_KEY", "", ""),
+		DashScopeBaseURL:             envOr("DASHSCOPE_BASE_URL", "", "https://dashscope.aliyuncs.com/api/v1"),
 		AdminUsername:                defaultAdminUsername,
 		AdminDisplayName:             defaultAdminDisplayName,
 		GeoIPProvider:                envOr("GEOIP_PROVIDER", yc.GeoIP.Provider, "ipwhois"),
@@ -655,7 +660,7 @@ func Load() Config {
 		ModelOptionPolicyMode:             "allowlist",
 		ModelOptionAllowedPaths:           DefaultModelOptionAllowedPathsJSON(),
 		ModelOptionDeniedPaths:            DefaultModelOptionDeniedPathsJSON(),
-		UserStorageQuotaBytes:             104857600,
+		UserStorageQuotaBytes:             10 * 1024 * 1024 * 1024,
 		MaxUploadFileBytes:                20971520,
 		MaxMessageFiles:                   10,
 		ImageMaxDimension:                 1024,
@@ -664,8 +669,9 @@ func Load() Config {
 		FileFullContextMaxTokens:          65536,
 		FileImageMaxBytes:                 0,
 		FileDocMaxBytes:                   0,
+		FileAudioMaxBytes:                 500 * 1024 * 1024,
 		FileFullContextPDFMaxPages:        20,
-		FileAllowedMIMETypes:              "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,text/plain,text/markdown,text/csv,text/yaml,application/json,application/yaml,application/x-yaml,application/toml,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
+		FileAllowedMIMETypes:              "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,text/plain,text/markdown,text/csv,text/yaml,application/json,application/yaml,application/x-yaml,application/toml,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
 		ExtractEngine:                     "builtin",
 		ExtractOCREngine:                  "rapidocr",
 		ExtractImageOCREnabled:            false,
@@ -773,6 +779,9 @@ func (c Config) Validate() error {
 		return fmt.Errorf("invalid config: SSRF allowlist: %w", err)
 	}
 	if err := validateHTTPIntegrationURL(c.TurnstileSiteverifyURL, "TURNSTILE_SITEVERIFY_URL"); err != nil {
+		return err
+	}
+	if err := validateHTTPIntegrationURL(c.DashScopeBaseURL, "DASHSCOPE_BASE_URL"); err != nil {
 		return err
 	}
 	if env != "prod" {

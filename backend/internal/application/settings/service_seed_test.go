@@ -80,6 +80,55 @@ func TestSeedMigratesLegacyDefaultAllowedMIMETypes(t *testing.T) {
 	}
 }
 
+func TestSeedMigratesVideoDefaultAllowedMIMETypesToAudio(t *testing.T) {
+	repo := newSettingsSeedRepo(domainsettings.SystemSetting{
+		Namespace: "file",
+		Key:       "allowed_mime_types",
+		Value:     videoDefaultAllowedMIMETypes,
+		ValueType: "string",
+	})
+	service := NewService(repo, "")
+
+	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+		t.Fatalf("seed settings: %v", err)
+	}
+	if got := repo.items["file:allowed_mime_types"].Value; got != defaultAllowedMIMETypes {
+		t.Fatalf("expected video MIME defaults to migrate to audio defaults, got %q", got)
+	}
+}
+
+func TestSeedMigratesLegacyDefaultStorageQuota(t *testing.T) {
+	repo := newSettingsSeedRepo(domainsettings.SystemSetting{
+		Namespace: "storage",
+		Key:       "user_storage_quota_bytes",
+		Value:     "104857600",
+		ValueType: "int",
+	})
+	service := NewService(repo, "")
+
+	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+		t.Fatalf("seed settings: %v", err)
+	}
+	if got := repo.items["storage:user_storage_quota_bytes"].Value; got != "10737418240" {
+		t.Fatalf("legacy quota = %q, want 10737418240", got)
+	}
+}
+
+func TestSeedUsesTenGiBDefaultStorageQuota(t *testing.T) {
+	repo := newSettingsSeedRepo()
+	service := NewService(repo, "")
+
+	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+		t.Fatalf("seed settings: %v", err)
+	}
+	if got := repo.items["storage:user_storage_quota_bytes"].Value; got != "10737418240" {
+		t.Fatalf("default quota = %q, want 10737418240", got)
+	}
+	if got := repo.items["file:audio_max_bytes"].Value; got != "524288000" {
+		t.Fatalf("default audio limit = %q, want 524288000", got)
+	}
+}
+
 func TestSeedKeepsCustomAllowedMIMETypes(t *testing.T) {
 	custom := "image/png,text/plain"
 	repo := newSettingsSeedRepo(domainsettings.SystemSetting{

@@ -183,6 +183,8 @@ func (r *RuntimeSettings) applyItem(cfg *config.Config, item domainsettings.Syst
 		cfg.FileImageMaxBytes = toOptionalInt64(item.Value, cfg.FileImageMaxBytes)
 	case "file:doc_max_bytes":
 		cfg.FileDocMaxBytes = toOptionalInt64(item.Value, cfg.FileDocMaxBytes)
+	case "file:audio_max_bytes":
+		cfg.FileAudioMaxBytes = toInt64(item.Value, cfg.FileAudioMaxBytes)
 	case "file:full_context_pdf_max_pages":
 		cfg.FileFullContextPDFMaxPages = toOptionalInt(item.Value, cfg.FileFullContextPDFMaxPages)
 	case "file:allowed_mime_types":

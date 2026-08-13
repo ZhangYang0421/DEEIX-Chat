@@ -99,6 +99,9 @@ func (s *Service) Seed(ctx context.Context, cfg config.Config) error {
 	if err := s.migrateDefaultAllowedMIMETypes(ctx); err != nil {
 		return err
 	}
+	if err := s.migrateDefaultStorageQuota(ctx); err != nil {
+		return err
+	}
 	return s.migrateDefaultModelOptionAllowedPaths(ctx)
 }
 
@@ -151,7 +154,7 @@ func (s *Service) migrateDefaultAllowedMIMETypes(ctx context.Context) error {
 			continue
 		}
 		value := strings.TrimSpace(item.Value)
-		if value == "" || !sameCSVSet(value, legacyDefaultAllowedMIMETypes) {
+		if value == "" || (!sameCSVSet(value, legacyDefaultAllowedMIMETypes) && !sameCSVSet(value, videoDefaultAllowedMIMETypes)) {
 			return nil
 		}
 		updates, encryptErr := s.encryptSettingsForStorage([]domainsettings.SystemSetting{{
@@ -165,6 +168,26 @@ func (s *Service) migrateDefaultAllowedMIMETypes(ctx context.Context) error {
 			return encryptErr
 		}
 		return s.repo.Upsert(ctx, updates)
+	}
+	return nil
+}
+
+func (s *Service) migrateDefaultStorageQuota(ctx context.Context) error {
+	items, err := s.repo.ListByNamespace(ctx, "storage")
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.Key != "user_storage_quota_bytes" || strings.TrimSpace(item.Value) != "104857600" {
+			continue
+		}
+		return s.repo.Upsert(ctx, []domainsettings.SystemSetting{{
+			Namespace:   "storage",
+			Key:         "user_storage_quota_bytes",
+			Value:       "10737418240",
+			ValueType:   "int",
+			Description: "用户总存储配额（管理页面按 MB 输入，内部以字节保存），0表示不限制",
+		}})
 	}
 	return nil
 }
@@ -434,6 +457,8 @@ func validatePatchItem(item PatchItem) error {
 		if value == "" {
 			return nil
 		}
+		return validateInt64Min(value, 1, key)
+	case "file:audio_max_bytes":
 		return validateInt64Min(value, 1, key)
 	case "storage:max_message_files":
 		return validateIntMinMax(value, 1, 50, key)

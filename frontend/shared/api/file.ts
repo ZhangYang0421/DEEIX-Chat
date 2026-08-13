@@ -7,6 +7,7 @@ import type {
   FileListResult,
   FileObjectDTO,
   FileProcessingStatusDTO,
+  FileTranscriptDTO,
   UploadFileResult,
 } from "@/shared/api/file.types";
 
@@ -203,6 +204,44 @@ export async function getFileProcessingStatus(
     `/api/v1/files/${pathParam(fileID)}/processing`,
     {
       method: "GET",
+      accessToken,
+    },
+    true,
+  );
+}
+
+export async function getFileTranscript(accessToken: string, fileID: string): Promise<FileTranscriptDTO> {
+  return authedRequest<FileTranscriptDTO>(
+    `/api/v1/files/${pathParam(fileID)}/transcript`,
+    { method: "GET", accessToken },
+    true,
+  );
+}
+
+export async function patchFileTranscript(
+  accessToken: string,
+  fileID: string,
+  patch: {
+    revision: number;
+    speakerNames?: Record<string, string>;
+    segments?: Array<{ segmentID: string; text: string }>;
+  },
+): Promise<FileTranscriptDTO> {
+  return authedRequest<FileTranscriptDTO>(
+    `/api/v1/files/${pathParam(fileID)}/transcript`,
+    { method: "PATCH", accessToken, body: patch },
+    true,
+  );
+}
+
+export async function retryAudioTranscription(
+  accessToken: string,
+  fileID: string,
+): Promise<{ fileID: string; processingStatus: string }> {
+  return authedRequest<{ fileID: string; processingStatus: string }>(
+    `/api/v1/files/${pathParam(fileID)}/transcription/retry`,
+    {
+      method: "POST",
       accessToken,
     },
     true,

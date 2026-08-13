@@ -9,6 +9,7 @@ import (
 	appprocessing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/processing"
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/funasr"
 )
 
 // ---------- Conversation ----------
@@ -1311,6 +1312,19 @@ func toFileProcessingStatusResponse(d *appprocessing.FileProcessingStatusDTO) Fi
 	}
 }
 
+// TranscriptResponse 结构化录音转写响应。
+type TranscriptResponse struct {
+	FileID       string                    `json:"fileID"`
+	Document     funasr.TranscriptDocument `json:"document"`
+}
+
+func toTranscriptResponse(result *appconversation.TranscriptResult) TranscriptResponse {
+	if result == nil {
+		return TranscriptResponse{}
+	}
+	return TranscriptResponse{FileID: result.FileID, Document: result.Document}
+}
+
 // FileExtractResponse 文件提取文本响应 DTO。
 type FileExtractResponse struct {
 	FileID       string `json:"fileID"`
@@ -1341,8 +1355,10 @@ type ChatFilePolicyResponse struct {
 	AllowedMIMETypes       []string `json:"allowedMIMETypes"`
 	ImageMaxBytes          int64    `json:"imageMaxBytes"`
 	DocMaxBytes            int64    `json:"docMaxBytes"`
+	AudioMaxBytes          int64    `json:"audioMaxBytes"`
 	EffectiveImageMaxBytes int64    `json:"effectiveImageMaxBytes"`
 	EffectiveDocMaxBytes   int64    `json:"effectiveDocMaxBytes"`
+	EffectiveAudioMaxBytes int64    `json:"effectiveAudioMaxBytes"`
 	FullContextMaxBytes    int64    `json:"fullContextMaxBytes"`
 	FullContextMaxTokens   int      `json:"fullContextMaxTokens"`
 	FullContextPDFMaxPages int      `json:"fullContextPDFMaxPages"`
@@ -1359,8 +1375,10 @@ func toChatFilePolicyResponse(d *appconversation.ChatFilePolicyDTO) ChatFilePoli
 		AllowedMIMETypes:       d.AllowedMIMETypes,
 		ImageMaxBytes:          d.ImageMaxBytes,
 		DocMaxBytes:            d.DocMaxBytes,
+		AudioMaxBytes:          d.AudioMaxBytes,
 		EffectiveImageMaxBytes: d.EffectiveImageMaxBytes,
 		EffectiveDocMaxBytes:   d.EffectiveDocMaxBytes,
+		EffectiveAudioMaxBytes: d.EffectiveAudioMaxBytes,
 		FullContextMaxBytes:    d.FullContextMaxBytes,
 		FullContextMaxTokens:   d.FullContextMaxTokens,
 		FullContextPDFMaxPages: d.FullContextPDFMaxPages,

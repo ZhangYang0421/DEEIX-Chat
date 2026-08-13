@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { CenteredEmptyState } from "@/components/ui/empty-state";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ContentMeta } from "@/features/files/components/sections/content/content-meta";
+import { TranscriptEditor } from "@/features/files/components/sections/content/transcript-editor";
 import { PreviewDocument } from "@/shared/components/file-preview/preview-document";
 import { PreviewDocx } from "@/shared/components/file-preview/preview-docx";
 import { PreviewLoading } from "@/shared/components/file-preview/preview-loading";
@@ -23,8 +24,8 @@ type ContentPreviewProps = {
   deferEmptyState: boolean;
   preview: FilePreviewState;
   extract: FileExtractState;
-  contentTab: "preview" | "extract";
-  onContentTabChange: (value: "preview" | "extract") => void;
+  contentTab: "preview" | "extract" | "transcript";
+  onContentTabChange: (value: "preview" | "extract" | "transcript") => void;
 };
 
 function PreviewEmpty({ title, description }: { title: string; description: string }) {
@@ -38,7 +39,11 @@ export function ContentPreview({ file, deferEmptyState, preview, extract, conten
   const [viewerLoading, setViewerLoading] = React.useState(false);
   const shouldUseInnerScrollRegion = contentTab === "preview" && preview.status === "ready" && preview.kind === "image";
   const previewKind = preview.status === "ready" ? preview.kind : null;
-  const previewLoading = contentTab === "preview" ? preview.status === "loading" || viewerLoading : extract.status === "loading" || extract.status === "idle";
+  const previewLoading = contentTab === "preview"
+    ? preview.status === "loading" || viewerLoading
+    : contentTab === "extract"
+      ? extract.status === "loading" || extract.status === "idle"
+      : false;
 
   React.useEffect(() => {
     setViewerLoading(false);
@@ -152,12 +157,15 @@ export function ContentPreview({ file, deferEmptyState, preview, extract, conten
       <div className="relative z-20 flex h-8 items-center justify-between gap-3">
         <Tabs
           value={contentTab}
-          onValueChange={(value) => onContentTabChange(value as "preview" | "extract")}
+          onValueChange={(value) => onContentTabChange(value as "preview" | "extract" | "transcript")}
           className="gap-0"
         >
           <TabsList className="h-8">
             <TabsTrigger value="preview">{t("preview")}</TabsTrigger>
             <TabsTrigger value="extract">{t("extract")}</TabsTrigger>
+            {file.fileCategory === "audio" && file.extractStatus === "ready" ? (
+              <TabsTrigger value="transcript">{t("transcript")}</TabsTrigger>
+            ) : null}
           </TabsList>
         </Tabs>
         <div ref={setToolbarContainer} className="flex min-h-8 shrink-0 items-center justify-end" />
@@ -169,7 +177,7 @@ export function ContentPreview({ file, deferEmptyState, preview, extract, conten
           shouldUseInnerScrollRegion ? "overflow-hidden" : "overflow-y-auto overflow-x-hidden",
         )}
       >
-        {contentTab === "preview" ? previewContent : extractContent}
+        {contentTab === "preview" ? previewContent : contentTab === "extract" ? extractContent : <TranscriptEditor fileID={file.fileID} />}
 
         {previewLoading ? (
           <PreviewLoading

@@ -2,6 +2,19 @@ package conversation
 
 import "testing"
 
+func TestConversationFilePolicyRecognizesMP3Audio(t *testing.T) {
+	gotMIME := normalizeDetectedMIME("application/octet-stream", "recording.mp3")
+	if gotMIME != "audio/mpeg" {
+		t.Fatalf("normalizeDetectedMIME() = %q, want audio/mpeg", gotMIME)
+	}
+	if got := inferFileCategory(gotMIME, "recording.mp3"); got != fileCategoryAudio {
+		t.Fatalf("inferFileCategory() = %q, want %q", got, fileCategoryAudio)
+	}
+	if !supportsExtraction(fileCategoryAudio) || !supportsRAG(fileCategoryAudio) {
+		t.Fatal("audio should support transcription and RAG")
+	}
+}
+
 func TestConversationFilePolicyRecognizesPresentations(t *testing.T) {
 	tests := []struct {
 		name     string

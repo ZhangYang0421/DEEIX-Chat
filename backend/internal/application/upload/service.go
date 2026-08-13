@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -215,11 +216,7 @@ func (s *Service) UploadFile(ctx context.Context, input UploadFileInput) (*Uploa
 	}
 
 	cfg := s.snapshot()
-	maxUploadBytes := cfg.MaxUploadFileBytes
-	if maxUploadBytes <= 0 {
-		maxUploadBytes = 20 * 1024 * 1024
-	}
-	if input.DeclaredSize > 0 && input.DeclaredSize > maxUploadBytes {
+	if input.DeclaredSize > 0 && input.DeclaredSize > maxUploadBytesForInput(normalizedName, normalizedMIME, cfg) {
 		return nil, s.errFileTooLarge()
 	}
 
@@ -232,6 +229,7 @@ func (s *Service) UploadFile(ctx context.Context, input UploadFileInput) (*Uploa
 	if err != nil {
 		return nil, err
 	}
+	streamMaxBytes := maxUploadBytesForInput(normalizedName, normalizedMIME, cfg)
 	relativePath, detectedMIME, shaValue, sizeBytes, err := saveUploadedFile(
 		ctx,
 		store,
@@ -239,7 +237,7 @@ func (s *Service) UploadFile(ctx context.Context, input UploadFileInput) (*Uploa
 		storageUserID,
 		fileID,
 		normalizedName,
-		maxUploadBytes,
+		streamMaxBytes,
 		normalizedMIME,
 	)
 	if err != nil {
@@ -253,6 +251,10 @@ func (s *Service) UploadFile(ctx context.Context, input UploadFileInput) (*Uploa
 		if err != nil && s.logger != nil {
 			s.logger.Warn("remove_uploaded_file_failed", zap.String("path", path), zap.Error(err))
 		}
+	}
+	if strings.EqualFold(filepath.Ext(normalizedName), ".mp3") && category != fileCategoryAudio {
+		logRemoveErr(relativePath, store.Delete(ctx, relativePath))
+		return nil, s.errMIMEBlocked()
 	}
 
 	if isDangerousMIME(detectedMIME) {
@@ -325,6 +327,11 @@ func (s *Service) UploadFile(ctx context.Context, input UploadFileInput) (*Uploa
 				zap.Error(initErr),
 			)
 		}
+		// 文件本体和配额已经持久化，向调用方返回可轮询的 failed 状态，避免客户端误判为“上传未成功”并重复上传。
+		fileItem.ProcessingStatus = "failed"
+		fileItem.ProcessingReady = false
+		fileItem.ProcessingErrorCode = "processing_queue_failed"
+		fileItem.ProcessingErrorMessage = "文件处理任务入队失败，请稍后重试"
 	} else if fileCategoryRequiresProcessing(category) {
 		fileItem.ProcessingStatus = "queued"
 		fileItem.ProcessingReady = false
@@ -460,17 +467,25 @@ func (s *Service) deleteFile(ctx context.Context, userID uint, fileID string, op
 		return nil, false, err
 	}
 	if shouldRemovePhysical {
+		paths := fileArtifactPaths(deletedFile)
+		if processing, processingErr := s.repo.GetFileObjectProcessingByObjectID(ctx, deletedFile.ID); processingErr == nil && processing != nil {
+			paths = mergeFileArtifactPaths(paths, processing.PayloadJSON)
+		}
 		store, storeErr := s.openObjectStore(ctx)
 		if storeErr != nil {
 			if s.logger != nil {
 				s.logger.Warn("object_store_init_failed", zap.Error(storeErr))
 			}
-		} else if rmErr := store.Delete(ctx, deletedFile.StoragePath); rmErr != nil && s.logger != nil {
-			s.logger.Warn("remove_deleted_file_failed",
-				zap.String("file_id", normalizedFileID),
-				zap.String("path", deletedFile.StoragePath),
-				zap.Error(rmErr),
-			)
+		} else {
+			for _, path := range paths {
+				if rmErr := store.Delete(ctx, path); rmErr != nil && s.logger != nil {
+					s.logger.Warn("remove_deleted_file_failed",
+						zap.String("file_id", normalizedFileID),
+						zap.String("path", path),
+						zap.Error(rmErr),
+					)
+				}
+			}
 		}
 	}
 
@@ -479,6 +494,39 @@ func (s *Service) deleteFile(ctx context.Context, userID uint, fileID string, op
 		FileID:  normalizedFileID,
 		Quota:   *quota,
 	}, true, nil
+}
+
+func mergeFileArtifactPaths(paths []string, payloadJSON string) []string {
+	var payload struct {
+		RawResultPath      string `json:"rawResultPath"`
+		TranscriptJSONPath string `json:"transcriptJSONPath"`
+		TranscriptMDPath   string `json:"transcriptMDPath"`
+	}
+	if json.Unmarshal([]byte(payloadJSON), &payload) == nil {
+		paths = append(paths, payload.RawResultPath, payload.TranscriptJSONPath, payload.TranscriptMDPath)
+	}
+	result := make([]string, 0, len(paths))
+	seen := map[string]struct{}{}
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		result = append(result, path)
+	}
+	return result
+}
+
+func fileArtifactPaths(file *domainconversation.FileObject) []string {
+	if file == nil {
+		return nil
+	}
+	paths := []string{strings.TrimSpace(file.StoragePath)}
+	return mergeFileArtifactPaths(paths, file.ProcessingPayloadJSON)
 }
 
 // RenameFile 重命名当前用户文件。
@@ -579,6 +627,7 @@ func (s *Service) OpenFileContent(ctx context.Context, userID uint, fileID strin
 
 const (
 	fileCategoryImage        = "image"
+	fileCategoryAudio        = "audio"
 	fileCategoryVideo        = "video"
 	fileCategoryPDF          = "pdf"
 	fileCategoryWord         = "word"
@@ -723,6 +772,8 @@ func normalizeDetectedMIME(detected string, fileName string) string {
 		return "text/yaml"
 	case "toml":
 		return "application/toml"
+	case "mp3":
+		return "audio/mpeg"
 	case "mp4":
 		return "video/mp4"
 	case "webm":
@@ -793,6 +844,8 @@ func inferFileCategory(mimeType string, fileName string) string {
 	switch {
 	case strings.HasPrefix(mimeType, "image/"):
 		return fileCategoryImage
+	case ext == "mp3" && (mimeType == "audio/mpeg" || mimeType == "audio/mp3"):
+		return fileCategoryAudio
 	case strings.HasPrefix(mimeType, "video/"):
 		return fileCategoryVideo
 	case mimeType == "application/pdf" || ext == "pdf":
@@ -827,7 +880,25 @@ func isAllowedMIME(mimeType string, cfg config.Config) bool {
 	return ok
 }
 
+func maxUploadBytesForInput(fileName string, declaredMIME string, cfg config.Config) int64 {
+	defaultLimit := cfg.MaxUploadFileBytes
+	if defaultLimit <= 0 {
+		defaultLimit = 20 * 1024 * 1024
+	}
+	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(fileName)))
+	mimeType := normalizeMIMEValue(declaredMIME)
+	if ext == ".mp3" && (mimeType == "audio/mpeg" || mimeType == "audio/mp3" || mimeType == "application/octet-stream") {
+		if cfg.FileAudioMaxBytes > 0 {
+			return cfg.FileAudioMaxBytes
+		}
+	}
+	return defaultLimit
+}
+
 func maxBytesForCategory(category string, cfg config.Config) int64 {
+	if category == fileCategoryAudio {
+		return cfg.FileAudioMaxBytes
+	}
 	if category == fileCategoryImage {
 		return cfg.FileImageMaxBytes
 	}
@@ -839,7 +910,7 @@ func maxBytesForCategory(category string, cfg config.Config) int64 {
 
 func fileCategoryRequiresProcessing(category string) bool {
 	switch category {
-	case fileCategoryPDF, fileCategoryWord, fileCategoryPresentation, fileCategoryExcel, fileCategoryText:
+	case fileCategoryPDF, fileCategoryWord, fileCategoryPresentation, fileCategoryExcel, fileCategoryText, fileCategoryAudio:
 		return true
 	default:
 		return false
@@ -848,7 +919,7 @@ func fileCategoryRequiresProcessing(category string) bool {
 
 func supportsRAG(category string) bool {
 	switch category {
-	case fileCategoryPDF, fileCategoryWord, fileCategoryPresentation, fileCategoryExcel, fileCategoryText, fileCategoryImage:
+	case fileCategoryPDF, fileCategoryWord, fileCategoryPresentation, fileCategoryExcel, fileCategoryText, fileCategoryImage, fileCategoryAudio:
 		return true
 	default:
 		return false

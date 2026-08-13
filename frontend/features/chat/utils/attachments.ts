@@ -1,7 +1,7 @@
 import type { ChatFilePolicyDTO } from "@/shared/api/file.types";
 import { formatBytes } from "@/shared/lib/file-display";
 
-export type UploadCategory = "image" | "pdf" | "word" | "excel" | "text" | "unknown";
+export type UploadCategory = "image" | "audio" | "pdf" | "word" | "excel" | "text" | "unknown";
 
 const TEXT_FILE_EXTENSIONS = [
   "txt",
@@ -98,6 +98,8 @@ function normalizeUploadMimeForPolicy(file: File): string {
       return "text/yaml";
     case "toml":
       return "application/toml";
+    case "mp3":
+      return "audio/mpeg";
   }
 
   if (TEXT_FILE_EXTENSIONS.includes(ext as (typeof TEXT_FILE_EXTENSIONS)[number])) {
@@ -132,6 +134,9 @@ export function inferUploadCategory(file: File): UploadCategory {
   if (mime.startsWith("image/")) {
     return "image";
   }
+  if ((mime === "audio/mpeg" || mime === "audio/mp3" || mime === "application/octet-stream") && ext === "mp3") {
+    return "audio";
+  }
   if (mime === "application/pdf" || ext === "pdf") {
     return "pdf";
   }
@@ -162,6 +167,9 @@ export function resolveEffectiveUploadLimit(policy: ChatFilePolicyDTO | null, ca
 
   if (category === "image") {
     return policy.effectiveImageMaxBytes || policy.imageMaxBytes || policy.maxUploadFileBytes;
+  }
+  if (category === "audio") {
+    return policy.effectiveAudioMaxBytes || policy.audioMaxBytes || policy.maxUploadFileBytes;
   }
 
   return policy.effectiveDocMaxBytes || policy.docMaxBytes || policy.maxUploadFileBytes;

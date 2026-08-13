@@ -590,6 +590,7 @@ export function AppChatArea() {
     onRemoveAttachment,
     onUploadFiles,
     onCaptureScreenshot,
+    onRetryTranscription,
   } = useChatAttachments({
     conversationKey,
     attachments,
@@ -1176,6 +1177,7 @@ export function AppChatArea() {
     onUploadFiles,
     onCaptureScreenshot,
     onRemoveAttachment,
+    onRetryTranscription,
     onSendMessage,
     onStopMessage: onStopActiveMessage,
     onDeleteQueuedMessage,

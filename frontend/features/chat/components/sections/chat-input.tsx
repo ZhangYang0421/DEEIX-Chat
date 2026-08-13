@@ -133,6 +133,7 @@ type ChatInputProps = {
   onUploadFiles: (files: File[]) => void | Promise<void>;
   onCaptureScreenshot: () => void | Promise<void>;
   onRemoveAttachment: (fileID: string) => void;
+  onRetryTranscription?: (fileID: string) => void | Promise<void>;
   onSendMessage: () => void | Promise<void>;
   onStopMessage: () => void;
   onDeleteQueuedMessage: (id: string) => void;
@@ -273,6 +274,7 @@ function ChatInputComponent({
   onUploadFiles,
   onCaptureScreenshot,
   onRemoveAttachment,
+  onRetryTranscription,
   onSendMessage,
   onStopMessage,
   onDeleteQueuedMessage,
@@ -318,7 +320,10 @@ function ChatInputComponent({
   const [inputGroupHeight, setInputGroupHeight] = React.useState<number | null>(null);
   const hasDraftText = draft.trim().length > 0;
   const hasSubmitContent = hasDraftText || attachments.length > 0;
-  const canSend = hasSubmitContent && !loading && !uploading;
+  const hasTranscriptionPending = attachments.some(
+    (item) => item.fileCategory === "audio" && item.processingReady !== true,
+  );
+  const canSend = hasSubmitContent && !loading && !uploading && !hasTranscriptionPending;
   const showMarkdownPreview = markdownPreview && hasDraftText;
   const inputHeightClassName =
     inputHeight === "compact" ? "max-h-32" : inputHeight === "loose" ? "max-h-64" : "max-h-44";
@@ -675,6 +680,12 @@ function ChatInputComponent({
 
           {hasComposerAttachments ? (
             <div className="w-full space-y-1 px-2.5 pt-1">
+              {hasTranscriptionPending ? (
+                <div className="flex items-center gap-2 rounded-lg border border-sky-200/70 bg-sky-50/70 px-3 py-2 text-[11px] text-sky-700 dark:border-sky-700/40 dark:bg-sky-950/30 dark:text-sky-400">
+                  <LoaderCircle className="size-3.5 shrink-0 animate-spin" strokeWidth={1.8} />
+                  <span>{tComposer("transcriptionPending")}</span>
+                </div>
+              ) : null}
               {showRagWarn ? (
                 <div className="flex items-center gap-2 rounded-lg border border-amber-200/70 bg-amber-50/70 px-3 py-2 text-[11px] text-amber-700 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-400">
                   <span className="shrink-0">⚠</span>
@@ -733,6 +744,16 @@ function ChatInputComponent({
                         aria-label={tComposer("previewAttachment", { name: item.fileName })}
                       />
                       <AttachmentActions>
+                        {item.fileCategory === "audio" && item.processingStatus === "failed" && onRetryTranscription ? (
+                          <AttachmentAction
+                            type="button"
+                            className="h-8 rounded-md px-2 text-[11px] text-primary hover:bg-accent sm:h-7"
+                            onClick={() => void onRetryTranscription(item.fileID)}
+                            aria-label={tComposer("retryTranscription")}
+                          >
+                            {tComposer("retryTranscription")}
+                          </AttachmentAction>
+                        ) : null}
                         <AttachmentAction
                           type="button"
                           className="size-8 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground sm:size-7"
@@ -1050,8 +1071,8 @@ function ChatInputComponent({
                 variant="ghost"
                 size="icon-sm"
                 className="size-7 rounded-md text-muted-foreground hover:text-foreground sm:size-8"
-                disabled={loading || uploading || (!sending && !hasSubmitContent && !speechInput.supported)}
-                onClick={hasSubmitContent ? onSendMessage : sending ? onStopMessage : speechInput.toggle}
+                disabled={loading || uploading || hasTranscriptionPending || (!sending && !hasSubmitContent && !speechInput.supported)}
+                onClick={hasSubmitContent && !hasTranscriptionPending ? onSendMessage : sending ? onStopMessage : speechInput.toggle}
                 onMouseEnter={() => setIsVoiceHovered(true)}
                 onMouseLeave={() => setIsVoiceHovered(false)}
                 aria-label={hasSubmitContent ? (sending ? tComposer("queueMessage") : tChat("send")) : sending ? tComposer("pauseGeneration") : speechInput.active ? tComposer("cancelVoiceInput") : tComposer("voiceInput")}
