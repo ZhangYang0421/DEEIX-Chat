@@ -715,6 +715,19 @@ func (r *uploadTestRepo) GetLatestActiveFileObjectBySHA(_ context.Context, userI
 	return nil, nil
 }
 
+func (r *uploadTestRepo) GetFileObjectProcessingByObjectID(_ context.Context, fileObjID uint) (*domainconversation.FileObjectProcessing, error) {
+	for i := range r.files {
+		if r.files[i].ID == fileObjID {
+			return &domainconversation.FileObjectProcessing{
+				FileObjectID: fileObjID,
+				UserID:       r.files[i].UserID,
+				PayloadJSON:  r.files[i].ProcessingPayloadJSON,
+			}, nil
+		}
+	}
+	return nil, repository.ErrNotFound
+}
+
 func (r *uploadTestRepo) CreateFileObjectAndConsumeQuota(_ context.Context, item *domainconversation.FileObject, quotaLimit int64) (*domainconversation.StorageQuota, error) {
 	if r.failNextCreateDuplicate {
 		r.failNextCreateDuplicate = false

@@ -51,6 +51,7 @@ type UploadRepository interface {
 	FileLookupRepository
 	GetUserByID(ctx context.Context, userID uint) (*domainuser.User, error)
 	GetLatestActiveFileObjectBySHA(ctx context.Context, userID uint, sha256 string, sizeBytes int64) (*domainconversation.FileObject, error)
+	GetFileObjectProcessingByObjectID(ctx context.Context, fileObjID uint) (*domainconversation.FileObjectProcessing, error)
 	CreateFileObjectAndConsumeQuota(ctx context.Context, item *domainconversation.FileObject, quotaLimit int64) (*domainconversation.StorageQuota, error)
 	DeleteFileObjectAndReleaseQuota(ctx context.Context, userID uint, fileID string, quotaLimit int64, options DeleteFileObjectOptions) (*domainconversation.FileObject, *domainconversation.StorageQuota, bool, error)
 	GetOrInitUserStorageQuota(ctx context.Context, userID uint, quotaLimit int64) (*domainconversation.StorageQuota, error)
