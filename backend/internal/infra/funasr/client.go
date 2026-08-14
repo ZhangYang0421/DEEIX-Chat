@@ -114,7 +114,7 @@ func (c *Client) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 	body := submitRequest{
 		Model: c.model,
-		Input: map[string]interface{}{"file_url": fileURL},
+		Input: map[string]interface{}{"file_urls": []string{fileURL}},
 		Parameters: map[string]interface{}{
 			"diarization_enabled": true,
 		},

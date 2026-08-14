@@ -36,8 +36,9 @@ func TestSubmitUsesAsyncDiarizationRequest(t *testing.T) {
 	}
 	params, _ := captured["parameters"].(map[string]interface{})
 	input, _ := captured["input"].(map[string]interface{})
-	if input["file_url"] != "https://storage.example.test/file.mp3?signature=redacted" {
-		t.Fatalf("file_url = %#v", input["file_url"])
+	fileURLs, ok := input["file_urls"].([]interface{})
+	if !ok || len(fileURLs) != 1 || fileURLs[0] != "https://storage.example.test/file.mp3?signature=redacted" {
+		t.Fatalf("file_urls = %#v", input["file_urls"])
 	}
 	if enabled, _ := params["diarization_enabled"].(bool); !enabled {
 		t.Fatalf("diarization must be enabled: %#v", params)
