@@ -62,16 +62,25 @@ func (r *Repo) CompareAndSwapTranscriptRevision(ctx context.Context, userID uint
 		return false, nil
 	}
 	const processingPayloadColumn = "processing_payload_json"
+	whereRevision := "COALESCE((processing_payload_json::jsonb ->> 'transcriptRevision')::int, 1) = ?"
+	updatedPayload := gorm.Expr(
+		"jsonb_set(COALESCE(NULLIF(processing_payload_json, ''), '{}')::jsonb, '{transcriptRevision}', to_jsonb(?::int), true)::text",
+		expectedRevision+1,
+	)
+	if r.sqliteDialect() {
+		whereRevision = "COALESCE(CAST(json_extract(processing_payload_json, '$.transcriptRevision') AS INTEGER), 1) = ?"
+		updatedPayload = gorm.Expr(
+			"json_set(CASE WHEN NULLIF(processing_payload_json, '') IS NULL THEN '{}' ELSE processing_payload_json END, '$.transcriptRevision', ?)",
+			expectedRevision+1,
+		)
+	}
 	result := r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
 		Where("user_id = ? AND file_id = ? AND status = ? AND file_category = ?", userID, fileID, "active", "audio").
-		Where("COALESCE((processing_payload_json::jsonb ->> 'transcriptRevision')::int, 1) = ?", expectedRevision).
+		Where(whereRevision, expectedRevision).
 		Updates(map[string]interface{}{
-			processingPayloadColumn: gorm.Expr(
-				"jsonb_set(COALESCE(NULLIF(processing_payload_json, ''), '{}')::jsonb, '{transcriptRevision}', to_jsonb(?::int), true)::text",
-				expectedRevision+1,
-			),
-			"updated_at": time.Now(),
+			processingPayloadColumn: updatedPayload,
+			"updated_at":            time.Now(),
 		})
 	if result.Error != nil {
 		return false, translateError(result.Error)
