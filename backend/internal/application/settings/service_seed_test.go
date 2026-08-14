@@ -97,6 +97,23 @@ func TestSeedMigratesVideoDefaultAllowedMIMETypesToAudio(t *testing.T) {
 	}
 }
 
+func TestSeedMigratesMP3DefaultAllowedMIMETypesToM4A(t *testing.T) {
+	repo := newSettingsSeedRepo(domainsettings.SystemSetting{
+		Namespace: "file",
+		Key:       "allowed_mime_types",
+		Value:     mp3DefaultAllowedMIMETypes,
+		ValueType: "string",
+	})
+	service := NewService(repo, "")
+
+	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+		t.Fatalf("seed settings: %v", err)
+	}
+	if got := repo.items["file:allowed_mime_types"].Value; got != defaultAllowedMIMETypes {
+		t.Fatalf("expected MP3 MIME defaults to migrate to M4A defaults, got %q", got)
+	}
+}
+
 func TestSeedMigratesLegacyDefaultStorageQuota(t *testing.T) {
 	repo := newSettingsSeedRepo(domainsettings.SystemSetting{
 		Namespace: "storage",

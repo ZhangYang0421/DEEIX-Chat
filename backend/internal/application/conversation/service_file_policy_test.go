@@ -15,6 +15,19 @@ func TestConversationFilePolicyRecognizesMP3Audio(t *testing.T) {
 	}
 }
 
+func TestConversationFilePolicyRecognizesM4AAudio(t *testing.T) {
+	gotMIME := normalizeDetectedMIME("application/octet-stream", "recording.m4a")
+	if gotMIME != "audio/mp4" {
+		t.Fatalf("normalizeDetectedMIME() = %q, want %q", gotMIME, "audio/mp4")
+	}
+	if got := inferFileCategory(gotMIME, "recording.m4a"); got != fileCategoryAudio {
+		t.Fatalf("inferFileCategory() = %q, want %q", got, fileCategoryAudio)
+	}
+	if !supportsExtraction(fileCategoryAudio) || !supportsRAG(fileCategoryAudio) {
+		t.Fatal("audio should support transcription and RAG")
+	}
+}
+
 func TestConversationFilePolicyRecognizesPresentations(t *testing.T) {
 	tests := []struct {
 		name     string

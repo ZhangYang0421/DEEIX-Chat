@@ -100,6 +100,8 @@ function normalizeUploadMimeForPolicy(file: File): string {
       return "application/toml";
     case "mp3":
       return "audio/mpeg";
+    case "m4a":
+      return "audio/mp4";
   }
 
   if (TEXT_FILE_EXTENSIONS.includes(ext as (typeof TEXT_FILE_EXTENSIONS)[number])) {
@@ -124,7 +126,7 @@ export function isAllowedUploadMime(file: File, policy: ChatFilePolicyDTO | null
 }
 
 export function inferUploadCategory(file: File): UploadCategory {
-  const mime = normalizeMimeValue(file.type);
+  const mime = normalizeUploadMimeForPolicy(file);
   const ext = resolveFileExtension(file.name);
 
   if (ACTIVE_FILE_EXTENSIONS.has(ext) || ACTIVE_UPLOAD_MIMES.has(mime)) {
@@ -134,7 +136,16 @@ export function inferUploadCategory(file: File): UploadCategory {
   if (mime.startsWith("image/")) {
     return "image";
   }
-  if ((mime === "audio/mpeg" || mime === "audio/mp3" || mime === "application/octet-stream") && ext === "mp3") {
+  if (
+    (mime === "audio/mpeg" || mime === "audio/mp3" || mime === "application/octet-stream") &&
+    ext === "mp3"
+  ) {
+    return "audio";
+  }
+  if (
+    (mime === "audio/mp4" || mime === "audio/x-m4a" || mime === "application/mp4" || mime === "application/octet-stream") &&
+    ext === "m4a"
+  ) {
     return "audio";
   }
   if (mime === "application/pdf" || ext === "pdf") {

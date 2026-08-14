@@ -3,6 +3,7 @@ package upload
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
 	"strings"
@@ -44,6 +45,60 @@ func TestUploadFileClassifiesMP3AsAudio(t *testing.T) {
 	if result.File.ProcessingStatus != "queued" || result.File.ProcessingReady {
 		t.Fatalf("audio processing state = %q ready=%v, want queued/false", result.File.ProcessingStatus, result.File.ProcessingReady)
 	}
+}
+
+func TestUploadFileClassifiesM4AAsAudio(t *testing.T) {
+	ctx := context.Background()
+	repo := newUploadTestRepo()
+	store := newUploadTestStore()
+	service := newUploadTestService(repo, store)
+
+	payload := validM4AHeaderPayload()
+	result, err := service.UploadFile(ctx, UploadFileInput{
+		UserID:       1,
+		Purpose:      "chat",
+		FileName:     "recording.m4a",
+		MimeType:     "audio/mp4",
+		DeclaredSize: int64(len(payload)),
+		Reader:       bytes.NewReader(payload),
+	})
+	if err != nil {
+		t.Fatalf("upload m4a failed: %v", err)
+	}
+	if result.File.DetectedMIME != "audio/mp4" {
+		t.Fatalf("detected MIME = %q, want audio/mp4", result.File.DetectedMIME)
+	}
+	if result.File.FileCategory != "audio" {
+		t.Fatalf("file category = %q, want audio", result.File.FileCategory)
+	}
+}
+
+func TestUploadFileRejectsM4AWithoutMPEG4ContainerHeader(t *testing.T) {
+	ctx := context.Background()
+	repo := newUploadTestRepo()
+	store := newUploadTestStore()
+	service := newUploadTestService(repo, store)
+
+	_, err := service.UploadFile(ctx, UploadFileInput{
+		UserID:       1,
+		Purpose:      "chat",
+		FileName:     "spoofed.m4a",
+		MimeType:     "audio/mp4",
+		DeclaredSize: 32,
+		Reader:       bytes.NewReader(bytes.Repeat([]byte("not-an-m4a"), 4)),
+	})
+	if err == nil {
+		t.Fatal("spoofed m4a content should be rejected")
+	}
+}
+
+func validM4AHeaderPayload() []byte {
+	payload := make([]byte, 32)
+	binary.BigEndian.PutUint32(payload[:4], 24)
+	copy(payload[4:8], "ftyp")
+	copy(payload[8:12], "M4A ")
+	copy(payload[16:20], "isom")
+	return payload
 }
 
 func TestUploadFileRejectsMP3WithNonMPEGMIME(t *testing.T) {
@@ -515,7 +570,7 @@ func newUploadTestService(repo *uploadTestRepo, store *uploadTestStore) *Service
 		MaxUploadFileBytes:    1024 * 1024,
 		UserStorageQuotaBytes: 10 * 1024 * 1024,
 		FileAudioMaxBytes:     500 * 1024 * 1024,
-		FileAllowedMIMETypes:  "audio/mpeg,text/plain,text/markdown",
+		FileAllowedMIMETypes:  "audio/mpeg,audio/mp4,text/plain,text/markdown",
 	}
 	service := NewServiceWithRuntime(config.NewRuntime(cfg), repo, nil, Hooks{}, ErrorSet{
 		InvalidFileReference: repository.ErrInvalidInput,

@@ -16,7 +16,7 @@
 ## 1. 目标架构
 
 ```text
-用户上传 MP3
+用户上传 MP3/M4A
     ↓
 DEEIX-Chat 后端
     ↓ S3 API（HTTPS）
@@ -29,7 +29,7 @@ DEEIX-Chat 后端
           └── 数据：宿主机大容量磁盘
 
 后续 Fun-ASR：
-DEEIX → 生成短期 Presigned GET URL → Fun-ASR 拉取 MP3
+DEEIX → 生成短期 Presigned GET URL → Fun-ASR 拉取 MP3/M4A 音频
 ```
 
 公网只公开：
@@ -398,7 +398,7 @@ sudo docker run --rm \
 
 部署者应使用 DEEIX 专用账号，而不是 root，执行以下验证：
 
-1. 上传一个不含隐私的测试文本或测试 MP3；
+1. 上传一个不含隐私的测试文本或测试 MP3/M4A；
 2. 读取对象；
 3. 生成短期 Presigned GET URL；
 4. 从**另一台机器或外部网络**在不附加 Cookie/Authorization Header 的情况下下载；

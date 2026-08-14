@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -252,7 +253,8 @@ func (s *Service) UploadFile(ctx context.Context, input UploadFileInput) (*Uploa
 			s.logger.Warn("remove_uploaded_file_failed", zap.String("path", path), zap.Error(err))
 		}
 	}
-	if strings.EqualFold(filepath.Ext(normalizedName), ".mp3") && category != fileCategoryAudio {
+	ext := strings.ToLower(filepath.Ext(normalizedName))
+	if (ext == ".mp3" || ext == ".m4a") && category != fileCategoryAudio {
 		logRemoveErr(relativePath, store.Delete(ctx, relativePath))
 		return nil, s.errMIMEBlocked()
 	}
@@ -777,6 +779,11 @@ func normalizeDetectedMIME(detected string, fileName string) string {
 			return "audio/mpeg"
 		}
 		return value
+	case "m4a":
+		if value == "audio/mp4" || value == "audio/x-m4a" || value == "application/mp4" {
+			return "audio/mp4"
+		}
+		return value
 	case "mp4":
 		return "video/mp4"
 	case "webm":
@@ -835,8 +842,12 @@ func isActiveUploadMIME(mimeType string) bool {
 }
 
 func detectContentMIME(header []byte, declared string, fileName string) string {
-	if strings.EqualFold(filepath.Ext(strings.TrimSpace(fileName)), ".mp3") && isLikelyMP3FrameHeader(header) {
+	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(fileName)))
+	if ext == ".mp3" && isLikelyMP3FrameHeader(header) {
 		return "audio/mpeg"
+	}
+	if ext == ".m4a" && isLikelyM4AHeader(header) {
+		return "audio/mp4"
 	}
 	if len(header) == 0 {
 		return normalizeDetectedMIME(declared, fileName)
@@ -856,13 +867,35 @@ func isLikelyMP3FrameHeader(header []byte) bool {
 	return bitrateIndex != 0 && bitrateIndex != 0x0f && sampleRateIndex != 0x03
 }
 
+func isLikelyM4AHeader(header []byte) bool {
+	if len(header) < 16 || string(header[4:8]) != "ftyp" {
+		return false
+	}
+	boxSize := binary.BigEndian.Uint32(header[:4])
+	if boxSize != 0 && boxSize < 16 {
+		return false
+	}
+	end := len(header)
+	if boxSize > 0 && uint64(boxSize) < uint64(end) {
+		end = int(boxSize)
+	}
+	for offset := 8; offset+4 <= end; offset += 4 {
+		switch string(header[offset : offset+4]) {
+		case "M4A ", "M4B ", "M4P ", "isom", "iso2", "iso5", "iso6", "mp41", "mp42":
+			return true
+		}
+	}
+	return false
+}
+
 func inferFileCategory(mimeType string, fileName string) string {
 	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(strings.TrimSpace(fileName)), "."))
 	switch {
 	case strings.HasPrefix(mimeType, "image/"):
 		return fileCategoryImage
-	case ext == "mp3" && (mimeType == "audio/mpeg" || mimeType == "audio/mp3"):
+	case ext == "mp3" && (mimeType == "audio/mpeg" || mimeType == "audio/mp3"),
+		ext == "m4a" && (mimeType == "audio/mp4" || mimeType == "audio/x-m4a" || mimeType == "application/mp4"):
 		return fileCategoryAudio
 	case strings.HasPrefix(mimeType, "video/"):
 		return fileCategoryVideo
@@ -905,7 +938,8 @@ func maxUploadBytesForInput(fileName string, declaredMIME string, cfg config.Con
 	}
 	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(fileName)))
 	mimeType := normalizeMIMEValue(declaredMIME)
-	if ext == ".mp3" && (mimeType == "audio/mpeg" || mimeType == "audio/mp3" || mimeType == "application/octet-stream") {
+	if (ext == ".mp3" && (mimeType == "audio/mpeg" || mimeType == "audio/mp3" || mimeType == "application/octet-stream")) ||
+		(ext == ".m4a" && (mimeType == "audio/mp4" || mimeType == "audio/x-m4a" || mimeType == "application/mp4" || mimeType == "application/octet-stream")) {
 		if cfg.FileAudioMaxBytes > 0 {
 			return cfg.FileAudioMaxBytes
 		}

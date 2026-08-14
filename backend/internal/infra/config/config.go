@@ -435,7 +435,7 @@ type Config struct {
 	FileFullContextMaxTokens          int    // 文本文件全文注入阈值（token）
 	FileImageMaxBytes                 int64  // 图片单文件上限（字节）
 	FileDocMaxBytes                   int64  // 文档单文件上限（字节）
-	FileAudioMaxBytes                 int64  // MP3 音频单文件上限（字节）
+	FileAudioMaxBytes                 int64  // MP3/M4A 音频单文件上限（字节）
 	FileFullContextPDFMaxPages        int    // PDF Full Context 页数上限，超出走 RAG
 	FileAllowedMIMETypes              string // 白名单 MIME 类型（逗号分隔）
 	ExtractEngine                     string // 提取主引擎枚举
@@ -671,7 +671,7 @@ func Load() Config {
 		FileDocMaxBytes:                   0,
 		FileAudioMaxBytes:                 500 * 1024 * 1024,
 		FileFullContextPDFMaxPages:        20,
-		FileAllowedMIMETypes:              "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,text/plain,text/markdown,text/csv,text/yaml,application/json,application/yaml,application/x-yaml,application/toml,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
+		FileAllowedMIMETypes:              "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,audio/mp4,text/plain,text/markdown,text/csv,text/yaml,application/json,application/yaml,application/x-yaml,application/toml,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
 		ExtractEngine:                     "builtin",
 		ExtractOCREngine:                  "rapidocr",
 		ExtractImageOCREnabled:            false,

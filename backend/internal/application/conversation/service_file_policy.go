@@ -55,6 +55,8 @@ func normalizeDetectedMIME(detected string, fileName string) string {
 		return "application/toml"
 	case "mp3":
 		return "audio/mpeg"
+	case "m4a":
+		return "audio/mp4"
 	}
 	if ext != "" && isTextMIMEForEmbed("", "sample."+ext) {
 		return "text/plain"
@@ -121,7 +123,9 @@ func inferFileCategory(mimeType string, fileName string) string {
 	switch {
 	case strings.HasPrefix(mime, "image/"):
 		return fileCategoryImage
-	case strings.HasPrefix(mime, "audio/") && ext == "mp3":
+	case (mime == "audio/mpeg" || mime == "audio/mp3") && ext == "mp3":
+		return fileCategoryAudio
+	case (mime == "audio/mp4" || mime == "audio/x-m4a" || mime == "application/mp4") && ext == "m4a":
 		return fileCategoryAudio
 	case strings.HasPrefix(mime, "video/"):
 		return fileCategoryVideo

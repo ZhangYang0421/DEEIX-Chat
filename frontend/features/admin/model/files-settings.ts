@@ -253,8 +253,8 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       {
         namespace: "file",
         key: "audio_max_bytes",
-        label: "MP3 size limit",
-        description: "Maximum size for one MP3 recording. The UI uses MB.",
+        label: "Audio size limit",
+        description: "Maximum size for one MP3 or M4A recording. The UI uses MB.",
         type: "int",
         placeholder: "Size limit (MB)",
         valueUnit: "mb",

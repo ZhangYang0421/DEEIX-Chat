@@ -11,7 +11,8 @@ import (
 const (
 	legacyDefaultAllowedMIMETypes = "image/jpeg,image/png,image/webp,image/gif,text/plain,text/markdown,text/csv,text/yaml,application/json,application/yaml,application/x-yaml,application/toml,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
 	videoDefaultAllowedMIMETypes  = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,text/plain,text/markdown,text/csv,text/yaml,application/json,application/yaml,application/x-yaml,application/toml,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-	defaultAllowedMIMETypes       = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,text/plain,text/markdown,text/csv,text/yaml,application/json,application/yaml,application/x-yaml,application/toml,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+	mp3DefaultAllowedMIMETypes    = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,text/plain,text/markdown,text/csv,text/yaml,application/json,application/yaml,application/x-yaml,application/toml,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+	defaultAllowedMIMETypes       = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,audio/mpeg,audio/mp4,text/plain,text/markdown,text/csv,text/yaml,application/json,application/yaml,application/x-yaml,application/toml,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
 	defaultRAGModel               = "sentence-transformers/all-MiniLM-L6-v2"
 )
 
@@ -90,7 +91,7 @@ func defaultSettings() []domainsettings.SystemSetting {
 		{Namespace: "file", Key: "full_context_max_tokens", Value: "65536", ValueType: "int", Description: "全文注入最大token预算，留空或0表示不限制"},
 		{Namespace: "file", Key: "image_max_bytes", Value: "", ValueType: "int", Description: "图片单文件大小上限（管理页面按 MB 输入，内部以字节保存），留空则回退默认附件大小上限"},
 		{Namespace: "file", Key: "doc_max_bytes", Value: "", ValueType: "int", Description: "文档单文件大小上限（管理页面按 MB 输入，内部以字节保存），留空则回退默认附件大小上限"},
-		{Namespace: "file", Key: "audio_max_bytes", Value: "524288000", ValueType: "int", Description: "MP3 音频单文件大小上限（管理页面按 MB 输入，内部以字节保存）"},
+		{Namespace: "file", Key: "audio_max_bytes", Value: "524288000", ValueType: "int", Description: "MP3/M4A 音频单文件大小上限（管理页面按 MB 输入，内部以字节保存）"},
 		{Namespace: "file", Key: "full_context_pdf_max_pages", Value: "20", ValueType: "int", Description: "PDF Full Context最大页数，留空或0表示不限制"},
 		{Namespace: "file", Key: "allowed_mime_types", Value: defaultAllowedMIMETypes, ValueType: "string", Description: "白名单MIME类型(逗号分隔)"},
 		{Namespace: "extract", Key: "engine", Value: "builtin", ValueType: "string", Description: "提取主引擎枚举(builtin/tika/docling/mineru)"},

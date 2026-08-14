@@ -154,7 +154,7 @@ func (s *Service) migrateDefaultAllowedMIMETypes(ctx context.Context) error {
 			continue
 		}
 		value := strings.TrimSpace(item.Value)
-		if value == "" || (!sameCSVSet(value, legacyDefaultAllowedMIMETypes) && !sameCSVSet(value, videoDefaultAllowedMIMETypes)) {
+		if value == "" || (!sameCSVSet(value, legacyDefaultAllowedMIMETypes) && !sameCSVSet(value, videoDefaultAllowedMIMETypes) && !sameCSVSet(value, mp3DefaultAllowedMIMETypes)) {
 			return nil
 		}
 		updates, encryptErr := s.encryptSettingsForStorage([]domainsettings.SystemSetting{{
