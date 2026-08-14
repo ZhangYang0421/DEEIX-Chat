@@ -39,7 +39,7 @@ DEEIX Chat 是一款开源可部署的 AI 平台，面向需要长期、稳定�
 | 对话体验 | 面向日常高频使用的多模态对话界面，支持流式响应、多分支、重试、编辑、反馈、分享、富文本渲染和可追踪的模型执行信息。 |
 | 模型与路由 | 以平台模型为统一入口管理上游渠道、真实模型、路由绑定、优先级、权重、熔断、厂商映射和能力配置，降低多供应商接入后的维护成本。 |
 | 协议与适配 | 统一适配 OpenAI、Anthropic、Google/Gemini、xAI、OpenRouter 和 OpenAI 兼容协议，覆盖文本、图片、工具和不同厂商的原生能力差异。 |
-| 文件与检索 | 提供文件上传、预览、提取、OCR、存储配额、全文注入、分片、向量嵌入和语义检索能力，让文件内容自然进入对话上下文。 |
+| 文件与检索 | 提供文件上传、预览、提取、OCR、存储配额、全文注入、分片、向量嵌入和语义检索能力，让文件内容自然进入对话上下文。MP3/M4A 录音还支持异步转写、说话人分离、Transcript 编辑和时间窗口 RAG。 |
 | 工具生态 | 同时支持 MCP Server 和厂商官方原生工具，覆盖工具发现、启停、用户选择、执行限制、结果渲染和调用链路追踪。 |
 | 上下文与记忆 | 支持消息窗口、Token 预算、压缩摘要、会话记忆、长期记忆和 RAG 证据记录，在可控成本下维持连续对话体验。 |
 | 计费与支付 | 内置模型定价、工具按次定价、订阅、充值、余额、用量账本、计费快照、Stripe Checkout、易支付和 Webhook 校验。 |
@@ -79,6 +79,8 @@ flowchart TB
 
   subgraph External["外部能力"]
     Providers["模型服务商<br/>OpenAI / Anthropic / Google / xAI / OpenRouter"]
+    Speech["DashScope Fun-ASR<br/>MP3/M4A 异步转写"]
+    Embeddings["Embedding 服务商<br/>DashScope 兼容或自定义"]
     Tools["工具服务<br/>MCP / 官方原生工具"]
     Extractors["可选文件处理<br/>Tika / Docling / OCR"]
   end
@@ -95,6 +97,8 @@ flowchart TB
   HTTP --> App
   App --> Infra
   Infra --> Providers
+  Infra --> Speech
+  Infra --> Embeddings
   Infra --> Tools
   Infra --> Extractors
   Infra --> DB
@@ -108,11 +112,83 @@ flowchart TB
 | 后端运行时 | API、认证授权、业务编排、协议适配、静态资源托管 | Go 1.26、Gin、Gorm、Swagger、OpenTelemetry、Zap |
 | 数据与缓存 | 领域数据、向量检索、会话状态、运行时缓存 | PostgreSQL、pgvector、SQLite、sqlite-vec、Redis、内存缓存 |
 | 文件与存储 | 上传文件、生成文件、对象存储和本地持久化 | 本地文件系统、S3 兼容对象存储 |
-| 文件处理 | 文本提取、OCR、文档解析和 LLM OCR 回退 | 内置提取、Apache Tika、Docling、RapidOCR、Tesseract OCR、Paddle OCR、云 OCR 适配、MinerU |
+| 文件处理 | 文本提取、OCR、文档解析、音频转写和 LLM OCR 回退 | 内置提取、DashScope Fun-ASR、Apache Tika、Docling、RapidOCR、Tesseract OCR、Paddle OCR、云 OCR 适配、MinerU |
 | 工具协议 | MCP 工具接入和厂商官方原生工具调用 | MCP Streamable HTTP JSON-RPC、Provider Native Tools |
 | 部署运行 | 单节点轻量部署或多节点生产部署 | Docker、Docker Compose、SQLite/内存缓存、PostgreSQL/Redis |
 
 后端内部保持清晰分层：`cmd/internal/cli` 负责启动入口，`internal/app` 负责应用装配，`transport/http` 负责 HTTP 边界，`application` 负责业务用例与事务编排，`domain` 表达领域语义，`infra` 承载数据库、缓存、存储和外部协议实现。数据层按领域前缀组织表结构，财务流水、审计日志、系统事件和高增长向量数据保持独立事实源。
+
+## 音频转写：MP3 与 M4A
+
+录音作为一类独立文件附件处理。目前支持**单个 MP3 或 M4A 文件**：
+
+- MP3：`audio/mpeg` / `.mp3`；
+- M4A：`audio/mp4` / `.m4a`；
+- 单个音频最大 `500 MB`，管理员可以调整音频单文件上限；
+- WAV、视频音轨和批量转写暂不在当前范围内；
+- 后端校验 MIME、扩展名、大小、SHA-256，以及合理的 MP3 Frame Header 或 MPEG-4 `ftyp` 容器头，不依赖 `ffprobe`。
+
+### 处理流程
+
+```text
+浏览器上传
+  → 私有 S3 兼容存储（通常为 MinIO）
+  → 短期 HTTPS Presigned GET URL
+  → DashScope Fun-ASR 异步任务
+  → 持久化轮询与重启恢复
+  → 转写产物和文件处理状态
+  → 可选 Embedding 与时间窗口 RAG
+```
+
+后端始终启用 Fun-ASR 说话人分离，由模型自动估计说话人数。转写完成前，携带录音附件的聊天消息不能发送。Fun-ASR 失败后进入音频专属死信路径，只允许手动重试，不继承普通文档的自动重试策略。
+
+每个完成的录音会生成三个对象：
+
+| 产物 | 用途 | 可修改性 |
+| --- | --- | --- |
+| `result.raw.json` | 保存供应商原始响应，用于审计和排查 | Transcript API 不允许修改 |
+| `transcript.json` | 标准化转写，包含时间戳、置信度、说话人名称和可编辑文本 | 通过带 revision 校验的 PATCH API 修改 |
+| `transcript.md` | 文件页预览和检索使用的文本 | Transcript 修改后重新生成 |
+
+进入 **Files → Transcript** 可以播放音频和编辑转写。可以重命名说话人，也可以逐句把当前句段重新归属到其他说话人。这些人工归属保存在 `speakerOverrides` 中；模型原始 `speakerID` 和原始结果保持不变。保存使用 revision compare-and-swap，编辑后的转写会重新进入 RAG Embedding。
+
+Transcript 接口：
+
+| 方法 | 接口 | 用途 |
+| --- | --- | --- |
+| `GET` | `/api/v1/files/:file_id/transcript` | 读取标准化 Transcript 和 revision |
+| `PATCH` | `/api/v1/files/:file_id/transcript` | 携带 revision CAS 保存说话人名称、人工归属和句段文本 |
+| `POST` | `/api/v1/files/:file_id/transcription/retry` | 手动重试失败的录音转写 |
+
+### 音频和 RAG 配置
+
+DashScope 凭证只配置在后端，不能暴露给浏览器：
+
+```env
+DASHSCOPE_API_KEY=<仅服务端使用的 DashScope API Key>
+DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/api/v1
+```
+
+音频转写需要能够生成 Fun-ASR 可访问的短期 HTTPS GET 地址的 S3 兼容对象存储。Bucket 应保持私有，只通过 HTTPS 反向代理暴露访问入口；不要发布 S3 凭证或永久对象 URL。
+
+在后台管理中配置上传策略和音频处理设置：
+
+- `file.allowed_mime_types` 必须包含 `audio/mpeg` 和 `audio/mp4`；
+- `file.audio_max_bytes` 默认是 `524288000` 字节（`500 MB`）；
+- `file.embedding_enabled` 控制转写完成后是否建立音频索引。
+
+如需启用音频 RAG，在后台管理中配置运行时设置：
+
+- `file.embedding_enabled=true`；
+- `file.embedding_host` 指向兼容的 Embedding endpoint；
+- `file.rag_model` 与 `file.embedding_output_dimensions` 和向量存储保持一致；
+- `chat.rag_enabled=true`。
+
+默认音频 RAG 使用句子边界切分，时间窗口约 2 分钟，相邻窗口重叠约 15 秒。聊天请求只检索相关时间范围，不会每次把完整录音正文注入 Prompt。
+
+### 隐私和运行边界
+
+录音可能包含个人隐私或机密信息。上传前应确认向配置的第三方 ASR 或 Embedding 服务发送该文件符合隐私和合规要求。系统正常日志不会打印 API Key、MinIO Secret、完整 Presigned URL 或完整供应商转写正文。生产环境还应配置 HTTPS 公开地址、备份、存储容量告警和恢复流程。
 
 ## 快速开始
 
@@ -223,6 +299,14 @@ docker compose -f docker-compose.full.yml up -d
 ```bash
 DEEIX_CHAT_IMAGE=deeix-chat:local docker compose up -d --build
 ```
+
+#### 维护者部署说明
+
+- 多架构镜像的 canonical workflow 是 `.github/workflows/ghcr-image.yml`，负责发布 `amd64` 和 `arm64` 镜像到 GHCR。
+- 资源受限的 VPS 应直接拉取已发布镜像，不要在 VPS 上执行 Next.js/Turbopack 生产构建或本地多架构 Docker 构建。
+- 低依赖测试方案使用 `docker-compose.sqlite.yml`，组合 SQLite、`sqlite-vec`、进程内 memory cache 和外部私有 S3 兼容存储（例如 MinIO）。
+- MinIO 应保持私有。Fun-ASR 只需要短期 HTTPS Presigned GET URL；不要把 `9000` 和 `9001` 端口直接暴露到公网。
+- 运行时密钥应放在仓库外，禁止提交 `DASHSCOPE_API_KEY`、S3 凭证、GHCR Token 或完整 Presigned URL。
 
 `APP_ENV` 支持 `dev`/`development` 和 `prod`/`production`，内部会规范化为 `dev` 或 `prod`；未配置时默认 `prod`。`dev` 只用于本地开发；公网生产部署应保持 `APP_ENV=prod` 或 `APP_ENV=production` 并使用生产密钥。
 
@@ -339,6 +423,8 @@ docker compose logs app
 | 安全 | `SSRF_ALLOWED_HOSTS` | 部署级集成或可信私网重定向目标的主机名，逗号分隔。 |
 | 安全 | `SSRF_ALLOWED_CIDRS` | 部署级集成或可信私网重定向目标的 CIDR 网段，逗号分隔。 |
 | 安全 | `TURNSTILE_SITEVERIFY_URL` | Cloudflare Turnstile siteverify 端点。 |
+| 语音 / ASR | `DASHSCOPE_API_KEY` | 服务端使用的 DashScope API Key，用于 Fun-ASR，以及在满足安全条件时用于官方 DashScope 兼容 Embedding endpoint。不能暴露给前端。 |
+| 语音 / ASR | `DASHSCOPE_BASE_URL` | Fun-ASR 使用的 DashScope API base URL，默认 `https://dashscope.aliyuncs.com/api/v1`。 |
 | 数据库 | `DATABASE_DRIVER` | `postgres` 或 `sqlite`。 |
 | PostgreSQL | `POSTGRES_DSN` | PostgreSQL DSN。 |
 | PostgreSQL | `POSTGRES_MAX_OPEN_CONNS` | 最大打开连接数。 |
@@ -404,6 +490,30 @@ Web、App 与桌面端会自动复用当前实例的这个回调。外部身份�
 - [管理指南](https://deeix.com/zh/docs/deeix-chat/admin-accounts)
 - [进阶指南](https://deeix.com/zh/docs/deeix-chat/advanced-capabilities-passthrough-tools)
 
+## 开发与验证
+
+在仓库根目录安装依赖后执行工作区检查：
+
+```bash
+pnpm check
+pnpm test
+```
+
+常用的定向命令：
+
+```bash
+pnpm --filter @deeix/web check
+pnpm --filter @deeix/api test
+pnpm api:check
+```
+
+如果修改了 API contract，提交前重新生成并检查共享契约：
+
+```bash
+pnpm api:generate
+pnpm api:check
+```
+
 ## 安全说明
 
 - 用户密码使用 bcrypt 哈希存储。
@@ -426,6 +536,7 @@ Web、App 与桌面端会自动复用当前实例的这个回调。外部身份�
 - 贡献指南：[CONTRIBUTING.md](../.github/CONTRIBUTING.md)
 - 安全策略：[SECURITY.md](../.github/SECURITY.md)
 - Swagger UI：`http://localhost:8080/swagger/index.html`
+- 音频/MinIO 部署手册：[MINIO-DEPLOYMENT.md](../MINIO-DEPLOYMENT.md)
 
 ## 鸣谢
 

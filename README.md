@@ -39,7 +39,7 @@ The system is designed around simple deployment, efficient static delivery, and 
 | Conversations | A multimodal chat interface for daily use, with streaming, branches, retries, edits, feedback, sharing, rich rendering, and traceable model execution metadata. |
 | Models and routing | A platform-model layer for upstream channels, real models, route bindings, priority, weights, circuit breaking, vendor mapping, and capability configuration, reducing the cost of multi-provider operations. |
 | Protocols and adaptation | Unified support for OpenAI, Anthropic, Google/Gemini, xAI, OpenRouter, and OpenAI-compatible protocols across text, image, tools, and provider-native capability differences. |
-| Files and retrieval | File upload, preview, extraction, OCR, storage quota, full-context injection, chunking, embeddings, and semantic retrieval so file content can naturally enter the conversation context. |
+| Files and retrieval | File upload, preview, extraction, OCR, storage quota, full-context injection, chunking, embeddings, and semantic retrieval so file content can naturally enter the conversation context. MP3/M4A recordings also support asynchronous transcription, speaker diarization, transcript editing, and time-aware RAG. |
 | Tool ecosystem | MCP servers and provider-native official tools with discovery, enablement, user selection, execution limits, result rendering, and tool-call traceability. |
 | Context and memory | Message windows, token budgets, summary compression, conversation memory, long-term memory, and RAG evidence records for controlled-cost continuity. |
 | Billing and payments | Model pricing, per-call tool pricing, subscriptions, top-ups, balances, usage ledgers, billing snapshots, Stripe Checkout, EPay, and webhook validation. |
@@ -79,6 +79,8 @@ flowchart TB
 
   subgraph External["External Capabilities"]
     Providers["Model Providers<br/>OpenAI / Anthropic / Google / xAI / OpenRouter"]
+    Speech["DashScope Fun-ASR<br/>Async MP3/M4A transcription"]
+    Embeddings["Embedding Provider<br/>DashScope-compatible or custom"]
     Tools["Tool Services<br/>MCP / Provider Native Tools"]
     Extractors["Optional File Processing<br/>Tika / Docling / OCR"]
   end
@@ -95,6 +97,8 @@ flowchart TB
   HTTP --> App
   App --> Infra
   Infra --> Providers
+  Infra --> Speech
+  Infra --> Embeddings
   Infra --> Tools
   Infra --> Extractors
   Infra --> DB
@@ -108,11 +112,83 @@ flowchart TB
 | Backend runtime | APIs, authentication, authorization, orchestration, protocol adaptation, and static serving | Go 1.26, Gin, Gorm, Swagger, OpenTelemetry, Zap |
 | Data and cache | Domain data, vector retrieval, session state, and runtime cache | PostgreSQL, pgvector, SQLite, sqlite-vec, Redis, in-memory cache |
 | Files and storage | Uploaded files, generated files, object storage, and local persistence | Local filesystem, S3-compatible object storage |
-| File processing | Text extraction, OCR, document parsing, and LLM OCR fallback | Built-in extractors, Apache Tika, Docling, RapidOCR, Tesseract OCR, Paddle OCR, cloud OCR adapters, MinerU |
+| File processing | Text extraction, OCR, document parsing, audio transcription, and LLM OCR fallback | Built-in extractors, DashScope Fun-ASR, Apache Tika, Docling, RapidOCR, Tesseract OCR, cloud OCR adapters, MinerU |
 | Tool protocol | MCP tool integration and provider-native official tools | MCP Streamable HTTP JSON-RPC, provider-native tools |
 | Deployment runtime | Lightweight single-node deployment or multi-node production deployment | Docker, Docker Compose, SQLite/in-memory cache, PostgreSQL/Redis |
 
 The backend keeps clear internal boundaries: `cmd/internal/cli` handles entrypoints, `internal/app` assembles the application, `transport/http` owns the HTTP boundary, `application` coordinates use cases and transactions, `domain` expresses business semantics, and `infra` contains database, cache, storage, and external protocol implementations. The data layer uses domain-prefixed tables, while financial records, audit trails, system events, and high-growth vector data remain separate sources of truth.
+
+## Audio Transcription: MP3 and M4A
+
+Audio recordings are processed as first-class file attachments. The current implementation supports **one MP3 or M4A file at a time**:
+
+- MP3: `audio/mpeg` / `.mp3`;
+- M4A: `audio/mp4` / `.m4a`;
+- maximum size: `500 MB` per audio file, with the per-file limit configurable by administrators;
+- WAV, video tracks, and batch transcription are not part of the current scope;
+- the backend validates the MIME type, extension, size, SHA-256, and a reasonable MP3 frame or MPEG-4 `ftyp` header without requiring `ffprobe`.
+
+### Processing flow
+
+```text
+Browser upload
+  → private S3-compatible storage (usually MinIO)
+  → short-lived HTTPS Presigned GET URL
+  → DashScope Fun-ASR async task
+  → persistent task polling and restart recovery
+  → transcript artifacts and file processing state
+  → optional embedding and time-window RAG
+```
+
+The backend enables Fun-ASR speaker diarization and lets the model estimate the speaker count. While transcription is pending, a chat message containing the recording cannot be sent. Fun-ASR failures go to an audio-specific dead-letter path and are retried manually rather than inheriting the normal document retry policy.
+
+Each completed recording produces three objects:
+
+| Artifact | Purpose | Mutability |
+| --- | --- | --- |
+| `result.raw.json` | Original supplier response for audit and debugging | Immutable from the Transcript API |
+| `transcript.json` | Normalized transcript with timestamps, confidence, speaker names, and editable text | Editable through the revision-checked PATCH API |
+| `transcript.md` | Preview and retrieval representation | Regenerated after transcript edits |
+
+Open **Files → Transcript** to play the audio and edit it. You can rename speakers and reassign individual segments to another speaker. These changes are stored as `speakerOverrides`; the original model `speakerID` and raw result remain unchanged. Saving uses revision compare-and-swap, and edited transcript content is re-embedded for RAG.
+
+Transcript endpoints:
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/files/:file_id/transcript` | Read the normalized transcript and revision |
+| `PATCH` | `/api/v1/files/:file_id/transcript` | Save speaker names, speaker overrides, and segment text with revision CAS |
+| `POST` | `/api/v1/files/:file_id/transcription/retry` | Manually retry a failed audio transcription |
+
+### Audio and RAG configuration
+
+Set the DashScope credentials only on the backend; never expose them to the browser:
+
+```env
+DASHSCOPE_API_KEY=<server-side DashScope API key>
+DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/api/v1
+```
+
+Audio transcription requires an S3-compatible object store that can generate a public, short-lived HTTPS GET URL that Fun-ASR can fetch. Keep the bucket private and expose only the HTTPS reverse-proxy endpoint; do not publish S3 credentials or permanent object URLs.
+
+Configure the upload policy and audio processing settings in the admin console:
+
+- `file.allowed_mime_types` must include `audio/mpeg` and `audio/mp4`;
+- `file.audio_max_bytes` defaults to `524288000` bytes (`500 MB`);
+- `file.embedding_enabled` controls whether completed audio is indexed.
+
+To enable audio RAG, configure the runtime settings in the admin console:
+
+- `file.embedding_enabled=true`;
+- `file.embedding_host` set to a compatible embedding endpoint;
+- `file.rag_model` and `file.embedding_output_dimensions` matching the vector store;
+- `chat.rag_enabled=true`.
+
+The standard audio RAG layout uses sentence-boundary chunks in approximately two-minute windows with approximately fifteen seconds of overlap. The chat request retrieves relevant time ranges instead of injecting the entire recording into every prompt.
+
+### Privacy and operational boundaries
+
+Recordings may contain personal or confidential information. Confirm that sending the file to the configured third-party ASR or embedding provider is allowed before uploading it. The system does not print API keys, MinIO secrets, complete Presigned URLs, or complete supplier transcripts in normal logs. For production, configure HTTPS public URLs, backups, storage capacity alerts, and a restore procedure.
 
 ## Quick Start
 
@@ -223,6 +299,14 @@ The default application image is `ghcr.io/deeix-ai/deeix-chat:latest`. Override 
 ```bash
 DEEIX_CHAT_IMAGE=deeix-chat:local docker compose up -d --build
 ```
+
+#### Maintainer deployment notes
+
+- The canonical multi-architecture image workflow is `.github/workflows/ghcr-image.yml`; it publishes `amd64` and `arm64` images to GHCR.
+- Constrained VPS hosts should pull the published image instead of running the Next.js/Turbopack or multi-architecture Docker build locally.
+- The low-dependency test profile is `docker-compose.sqlite.yml` with SQLite, `sqlite-vec`, an in-memory cache, and an external private S3-compatible store such as MinIO.
+- MinIO should remain private. Fun-ASR needs only a short-lived HTTPS Presigned GET URL; ports `9000` and `9001` should not be exposed directly to the public network.
+- Keep runtime secrets outside the repository and never commit `DASHSCOPE_API_KEY`, S3 credentials, GHCR tokens, or complete Presigned URLs.
 
 `APP_ENV` accepts `dev`/`development` and `prod`/`production`, normalizes them to `dev` or `prod`, and defaults to `prod` when omitted. Use `dev` only for local development. Public production deployments should keep `APP_ENV=prod` or `APP_ENV=production` and use production secrets.
 
@@ -339,6 +423,8 @@ Static configuration environment variables:
 | Security | `SSRF_ALLOWED_HOSTS` | Exact hostnames for deployment-level integrations or trusted private redirect targets, comma-separated. |
 | Security | `SSRF_ALLOWED_CIDRS` | Trusted deployment-level integration or private redirect CIDRs, comma-separated. |
 | Security | `TURNSTILE_SITEVERIFY_URL` | Cloudflare Turnstile siteverify endpoint. |
+| Speech / ASR | `DASHSCOPE_API_KEY` | Server-side DashScope API key used by Fun-ASR and, when safely eligible, the official DashScope-compatible embedding endpoint. Never expose it to the frontend. |
+| Speech / ASR | `DASHSCOPE_BASE_URL` | DashScope API base URL used by Fun-ASR; default `https://dashscope.aliyuncs.com/api/v1`. |
 | Database | `DATABASE_DRIVER` | `postgres` or `sqlite`. |
 | PostgreSQL | `POSTGRES_DSN` | PostgreSQL DSN. |
 | PostgreSQL | `POSTGRES_MAX_OPEN_CONNS` | Maximum open connections. |
@@ -404,6 +490,30 @@ Web, App, and Desktop clients then reuse that instance callback automatically. T
 - [Admin Guide](https://deeix.com/docs/deeix-chat/admin-accounts)
 - [Advanced Guide](https://deeix.com/docs/deeix-chat/advanced-capabilities-passthrough-tools)
 
+## Development and Validation
+
+Run the workspace checks from the repository root after installing dependencies:
+
+```bash
+pnpm check
+pnpm test
+```
+
+Useful focused commands:
+
+```bash
+pnpm --filter @deeix/web check
+pnpm --filter @deeix/api test
+pnpm api:check
+```
+
+When an API contract changes, regenerate and verify the shared contract before committing:
+
+```bash
+pnpm api:generate
+pnpm api:check
+```
+
 ## Security Notes
 
 - User passwords are hashed with bcrypt.
@@ -426,6 +536,7 @@ Web, App, and Desktop clients then reuse that instance callback automatically. T
 - Contributing: [CONTRIBUTING.md](./.github/CONTRIBUTING.md)
 - Security policy: [SECURITY.md](./.github/SECURITY.md)
 - Swagger UI: `http://localhost:8080/swagger/index.html`
+- Audio/MinIO deployment runbook: [MINIO-DEPLOYMENT.md](./MINIO-DEPLOYMENT.md)
 
 ## Acknowledgements
 
