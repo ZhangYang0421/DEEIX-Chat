@@ -25,9 +25,9 @@ const (
 	audioProcessingEngine = "fun-asr"
 )
 
-// AudioProcessingPayload 是 file_objects.processing_payload_json 中的最小可恢复状态。
+// audioProcessingPayload 是 file_objects.processing_payload_json 中的最小可恢复状态。
 // 临时 Presigned URL 和供应商结果 URL 不落库，避免泄露签名参数。
-type AudioProcessingPayload struct {
+type audioProcessingPayload struct {
 	Version            int    `json:"version"`
 	Provider           string `json:"provider"`
 	Model              string `json:"model"`
@@ -118,7 +118,7 @@ func (s *Service) processAudioFile(ctx context.Context, fileObj *domainconversat
 	return s.pollAudio(ctx, store, fileObj, payload)
 }
 
-func (s *Service) submitAudio(ctx context.Context, store objectstore.Store, fileObj *domainconversation.FileObject, payload AudioProcessingPayload) error {
+func (s *Service) submitAudio(ctx context.Context, store objectstore.Store, fileObj *domainconversation.FileObject, payload audioProcessingPayload) error {
 	fileURL, err := store.PresignGet(ctx, fileObj.StoragePath, audioPresignExpiry)
 	if err != nil {
 		code := "transcription_presign_failed"
@@ -166,7 +166,7 @@ func (s *Service) submitAudio(ctx context.Context, store objectstore.Store, file
 	return nil
 }
 
-func (s *Service) pollAudio(ctx context.Context, store objectstore.Store, fileObj *domainconversation.FileObject, payload AudioProcessingPayload) error {
+func (s *Service) pollAudio(ctx context.Context, store objectstore.Store, fileObj *domainconversation.FileObject, payload audioProcessingPayload) error {
 	requestCtx, cancel := context.WithTimeout(ctx, audioRequestTimeout)
 	status, err := s.transcriber.GetTask(requestCtx, payload.TaskID)
 	cancel()
@@ -293,7 +293,7 @@ func (s *Service) openObjectStore(ctx context.Context) (objectstore.Store, error
 	return s.storeProvider.Open(ctx)
 }
 
-func (s *Service) persistAudioProgress(ctx context.Context, fileObj *domainconversation.FileObject, payload AudioProcessingPayload, processingStatus string, extractStatus string, startedAt *time.Time, completedAt *time.Time) error {
+func (s *Service) persistAudioProgress(ctx context.Context, fileObj *domainconversation.FileObject, payload audioProcessingPayload, processingStatus string, extractStatus string, startedAt *time.Time, completedAt *time.Time) error {
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -351,15 +351,15 @@ func (s *Service) recoverAudioProcessing(ctx context.Context) {
 	}
 }
 
-func parseAudioProcessingPayload(raw string) AudioProcessingPayload {
-	payload := AudioProcessingPayload{Version: 1, Provider: "dashscope", Model: funasr.DefaultModel, Stage: "uploaded"}
+func parseAudioProcessingPayload(raw string) audioProcessingPayload {
+	payload := audioProcessingPayload{Version: 1, Provider: "dashscope", Model: funasr.DefaultModel, Stage: "uploaded"}
 	if strings.TrimSpace(raw) != "" {
 		_ = json.Unmarshal([]byte(raw), &payload)
 	}
 	return payload
 }
 
-func mustMarshalAudioPayload(payload AudioProcessingPayload) []byte {
+func mustMarshalAudioPayload(payload audioProcessingPayload) []byte {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return []byte("{}")

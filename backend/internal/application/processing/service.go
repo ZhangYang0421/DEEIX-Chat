@@ -211,7 +211,7 @@ func (s *Service) InitializeUploadedFile(ctx context.Context, fileObj *domaincon
 	}
 	var initialPayloadJSON *string
 	if fileObj.FileCategory == "audio" {
-		payload, marshalErr := json.Marshal(AudioProcessingPayload{
+		payload, marshalErr := json.Marshal(audioProcessingPayload{
 			Version:  1,
 			Provider: "dashscope",
 			Model:    funasr.DefaultModel,
