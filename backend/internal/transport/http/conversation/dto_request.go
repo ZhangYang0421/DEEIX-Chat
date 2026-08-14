@@ -91,9 +91,10 @@ type UpdateFileRequest struct {
 
 // PatchFileTranscriptRequest 批量保存录音人工修订。
 type PatchFileTranscriptRequest struct {
-	Revision     int                                 `json:"revision" binding:"required,min=1"`
-	SpeakerNames map[string]string                   `json:"speakerNames,omitempty"`
-	Segments     []PatchFileTranscriptSegmentRequest `json:"segments,omitempty" binding:"max=5000,dive"`
+	Revision         int                                 `json:"revision" binding:"required,min=1"`
+	SpeakerNames     map[string]string                   `json:"speakerNames,omitempty"`
+	SpeakerOverrides map[string]string                   `json:"speakerOverrides,omitempty"`
+	Segments         []PatchFileTranscriptSegmentRequest `json:"segments,omitempty" binding:"max=5000,dive"`
 }
 
 type PatchFileTranscriptSegmentRequest struct {

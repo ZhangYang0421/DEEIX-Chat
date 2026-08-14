@@ -99,6 +99,8 @@
     "title": "Audio transcript",
     "revision": "Revision {revision}",
     "speakerNames": "Speaker names",
+    "effectiveSpeakerCount": "Effective speakers: {count}",
+    "speakerOverrideHint": "Reassign a speaker per segment. Assign multiple model labels to the same person to merge them.",
     "speaker": "Speaker {id}",
     "unknownSpeaker": "Unknown speaker",
     "reviewSuggested": "Review suggested",

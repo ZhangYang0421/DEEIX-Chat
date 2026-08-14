@@ -99,6 +99,8 @@
     "title": "录音转写",
     "revision": "修订版本 {revision}",
     "speakerNames": "说话人名称",
+    "effectiveSpeakerCount": "当前有效说话人：{count} 人",
+    "speakerOverrideHint": "可逐句重新指定说话人；将多个模型标签指定为同一人即可合并说话人。",
     "speaker": "说话人 {id}",
     "unknownSpeaker": "未知说话人",
     "reviewSuggested": "建议试听",

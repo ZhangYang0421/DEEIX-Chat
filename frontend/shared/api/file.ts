@@ -224,6 +224,7 @@ export async function patchFileTranscript(
   patch: {
     revision: number;
     speakerNames?: Record<string, string>;
+    speakerOverrides?: Record<string, string>;
     segments?: Array<{ segmentID: string; text: string }>;
   },
 ): Promise<FileTranscriptDTO> {

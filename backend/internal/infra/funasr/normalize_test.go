@@ -39,6 +39,16 @@ func TestNormalizeRawAndMarkdown(t *testing.T) {
 	if !strings.Contains(chunks[0], "[") || !strings.Contains(chunks[0], "说话人") {
 		t.Fatalf("chunk missing header/speaker: %s", chunks[0])
 	}
+
+	doc.SpeakerOverrides = map[string]string{doc.Segments[1].SegmentID: "0"}
+	markdown := RenderMarkdown(doc, false)
+	if strings.Contains(markdown, "说话人2：** 你好啊") || !strings.Contains(markdown, "说话人1：** 你好啊") {
+		t.Fatalf("speaker override not reflected in markdown: %s", markdown)
+	}
+	chunks = BuildTimeWindowChunks(doc, 2*time.Minute, 15*time.Second)
+	if !strings.Contains(strings.Join(chunks, "\n"), "说话人1：你好啊") {
+		t.Fatalf("speaker override not reflected in RAG chunks: %#v", chunks)
+	}
 }
 
 func TestLowConfidenceFlag(t *testing.T) {

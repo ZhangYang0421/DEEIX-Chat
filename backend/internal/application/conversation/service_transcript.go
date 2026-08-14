@@ -23,9 +23,10 @@ type TranscriptResult struct {
 }
 
 type TranscriptPatch struct {
-	Revision     int
-	SpeakerNames map[string]string
-	Segments     []TranscriptSegmentPatch
+	Revision         int
+	SpeakerNames     map[string]string
+	SpeakerOverrides map[string]string
+	Segments         []TranscriptSegmentPatch
 }
 
 type TranscriptSegmentPatch struct {
@@ -116,13 +117,39 @@ func (s *Service) PatchFileTranscript(ctx context.Context, userID uint, fileID s
 	for i := range result.Document.Segments {
 		segments[result.Document.Segments[i].SegmentID] = &result.Document.Segments[i]
 	}
-	for _, change := range patch.Segments {
-		segment := segments[strings.TrimSpace(change.SegmentID)]
-		if segment == nil || strings.TrimSpace(change.Text) == "" || len([]rune(change.Text)) > 20000 {
+	for segmentID, speakerKey := range patch.SpeakerOverrides {
+		segmentID = strings.TrimSpace(segmentID)
+		segment := segments[segmentID]
+		if segment == nil {
 			return nil, ErrTranscriptInvalidEdit
 		}
-		segment.Text = strings.TrimSpace(change.Text)
-		segment.Edited = segment.Text != segment.OriginalText
+		speakerKey = strings.TrimSpace(speakerKey)
+		if speakerKey == "" {
+			if result.Document.SpeakerOverrides != nil {
+				delete(result.Document.SpeakerOverrides, segmentID)
+			}
+			continue
+		}
+		if _, exists := result.Document.SpeakerNames[speakerKey]; !exists {
+			return nil, ErrTranscriptInvalidEdit
+		}
+		rawSpeakerKey := ""
+		if segment.SpeakerID != nil {
+			rawSpeakerKey = fmt.Sprintf("%d", *segment.SpeakerID)
+		}
+		if speakerKey == rawSpeakerKey {
+			if result.Document.SpeakerOverrides != nil {
+				delete(result.Document.SpeakerOverrides, segmentID)
+			}
+			continue
+		}
+		if result.Document.SpeakerOverrides == nil {
+			result.Document.SpeakerOverrides = make(map[string]string)
+		}
+		result.Document.SpeakerOverrides[segmentID] = speakerKey
+	}
+	if len(result.Document.SpeakerOverrides) == 0 {
+		result.Document.SpeakerOverrides = nil
 	}
 
 	result.Markdown = funasr.RenderMarkdown(&result.Document, true)

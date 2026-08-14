@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -30,8 +31,9 @@ type TranscriptDocument struct {
 	FileID       string            `json:"fileID,omitempty"`
 	FileName     string            `json:"fileName,omitempty"`
 	DurationMs   *int64            `json:"durationMs,omitempty"`
-	SpeakerNames map[string]string `json:"speakerNames"`
-	Segments     []Segment         `json:"segments"`
+	SpeakerNames     map[string]string `json:"speakerNames"`
+	SpeakerOverrides map[string]string `json:"speakerOverrides,omitempty"`
+	Segments         []Segment         `json:"segments"`
 	UpdatedAt    string            `json:"updatedAt,omitempty"`
 }
 
@@ -145,7 +147,7 @@ func RenderMarkdown(doc *TranscriptDocument, forRAG bool) string {
 	if doc.Model != "" {
 		b.WriteString(fmt.Sprintf("- 模型：`%s`\n", doc.Model))
 	}
-	b.WriteString("- 说话人编号由模型自动生成，可在页面重命名。\n\n")
+	b.WriteString("- 说话人编号由模型自动生成，可在页面重命名或逐句修正归属。\n\n")
 	if forRAG {
 		b.WriteString("## 分片转写\n\n")
 		for _, chunk := range BuildTimeWindowChunks(doc, 2*time.Minute, 15*time.Second) {
@@ -156,7 +158,7 @@ func RenderMarkdown(doc *TranscriptDocument, forRAG bool) string {
 	}
 	b.WriteString("## 转写结果\n\n")
 	for _, seg := range doc.Segments {
-		speaker := speakerLabel(doc, seg.SpeakerID)
+		speaker := speakerLabelForSegment(doc, seg)
 		start := formatTimestamp(seg.StartMs)
 		end := formatTimestamp(seg.EndMs)
 		flag := ""
@@ -210,7 +212,7 @@ func BuildTimeWindowChunks(doc *TranscriptDocument, window, overlap time.Duratio
 			if seg.EndMs <= start || seg.StartMs >= end {
 				continue
 			}
-			speaker := speakerLabel(doc, seg.SpeakerID)
+			speaker := speakerLabelForSegment(doc, seg)
 			lines = append(lines, fmt.Sprintf("%s：%s", speaker, seg.Text))
 		}
 		if len(lines) == 0 {
@@ -233,17 +235,26 @@ func BuildTimeWindowChunks(doc *TranscriptDocument, window, overlap time.Duratio
 	return chunks
 }
 
-func speakerLabel(doc *TranscriptDocument, speakerID *int) string {
-	if speakerID == nil {
+func speakerLabelForSegment(doc *TranscriptDocument, seg Segment) string {
+	key := ""
+	if doc != nil && doc.SpeakerOverrides != nil {
+		key = strings.TrimSpace(doc.SpeakerOverrides[seg.SegmentID])
+	}
+	if key == "" && seg.SpeakerID != nil {
+		key = fmt.Sprintf("%d", *seg.SpeakerID)
+	}
+	if key == "" {
 		return "说话人未知"
 	}
-	key := fmt.Sprintf("%d", *speakerID)
 	if doc != nil && doc.SpeakerNames != nil {
 		if name := strings.TrimSpace(doc.SpeakerNames[key]); name != "" {
 			return name
 		}
 	}
-	return fmt.Sprintf("说话人%d", *speakerID+1)
+	if speakerID, err := strconv.Atoi(key); err == nil {
+		return fmt.Sprintf("说话人%d", speakerID+1)
+	}
+	return key
 }
 
 func formatTimestamp(ms int64) string {

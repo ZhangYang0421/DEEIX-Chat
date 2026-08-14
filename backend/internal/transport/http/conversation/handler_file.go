@@ -220,7 +220,7 @@ func (h *Handler) PatchFileTranscript(c *gin.Context) {
 	if fileID == "" { response.Error(c, http.StatusBadRequest, "invalid file id"); return }
 	var req PatchFileTranscriptRequest
 	if err := c.ShouldBindJSON(&req); err != nil { response.InvalidRequestBody(c, err); return }
-	patch := appconversation.TranscriptPatch{Revision:req.Revision, SpeakerNames:req.SpeakerNames}
+	patch := appconversation.TranscriptPatch{Revision: req.Revision, SpeakerNames: req.SpeakerNames, SpeakerOverrides: req.SpeakerOverrides}
 	for _, segment := range req.Segments { patch.Segments = append(patch.Segments, appconversation.TranscriptSegmentPatch{SegmentID:segment.SegmentID, Text:segment.Text}) }
 	result, err := h.service.PatchFileTranscript(c.Request.Context(), userID, fileID, patch)
 	if err != nil {

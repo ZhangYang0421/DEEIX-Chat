@@ -31,6 +31,7 @@ export type FileTranscriptDTO = {
     fileName?: string;
     durationMs?: number;
     speakerNames: Record<string, string>;
+    speakerOverrides?: Record<string, string>;
     segments: FileTranscriptSegmentDTO[];
     updatedAt?: string;
   };
