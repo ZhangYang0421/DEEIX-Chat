@@ -93,7 +93,7 @@ func (s *Service) PatchFileTranscript(ctx context.Context, userID uint, fileID s
 	persisted := false
 	defer func() {
 		if !persisted {
-			_ = s.repo.CompareAndSwapTranscriptRevision(context.Background(), userID, normalizedFileID, patch.Revision+1)
+			_, _ = s.repo.CompareAndSwapTranscriptRevision(context.Background(), userID, normalizedFileID, patch.Revision+1)
 		}
 	}()
 

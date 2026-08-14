@@ -515,7 +515,7 @@ func newUploadTestService(repo *uploadTestRepo, store *uploadTestStore) *Service
 		MaxUploadFileBytes:    1024 * 1024,
 		UserStorageQuotaBytes: 10 * 1024 * 1024,
 		FileAudioMaxBytes:     500 * 1024 * 1024,
-		FileAllowedMIMETypes:  "audio/mpeg,text/plain",
+		FileAllowedMIMETypes:  "audio/mpeg,text/plain,text/markdown",
 	}
 	service := NewServiceWithRuntime(config.NewRuntime(cfg), repo, nil, Hooks{}, ErrorSet{
 		InvalidFileReference: repository.ErrInvalidInput,

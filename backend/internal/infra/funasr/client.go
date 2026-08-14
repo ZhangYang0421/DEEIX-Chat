@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	sharedsecurity "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 )
 
 const (
@@ -52,7 +54,7 @@ func New(cfg Config) *Client {
 	}
 	hc := cfg.HTTPClient
 	if hc == nil {
-		hc = &http.Client{Timeout: 120 * time.Second}
+		hc = sharedsecurity.NewOutboundHTTPClient(sharedsecurity.NewStrictOutboundPolicy(false), 120*time.Second)
 	}
 	return &Client{
 		apiKey:         strings.TrimSpace(cfg.APIKey),

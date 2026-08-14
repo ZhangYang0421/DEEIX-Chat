@@ -773,7 +773,10 @@ func normalizeDetectedMIME(detected string, fileName string) string {
 	case "toml":
 		return "application/toml"
 	case "mp3":
-		return "audio/mpeg"
+		if value == "audio/mpeg" || value == "audio/mp3" {
+			return "audio/mpeg"
+		}
+		return value
 	case "mp4":
 		return "video/mp4"
 	case "webm":
@@ -832,10 +835,25 @@ func isActiveUploadMIME(mimeType string) bool {
 }
 
 func detectContentMIME(header []byte, declared string, fileName string) string {
+	if strings.EqualFold(filepath.Ext(strings.TrimSpace(fileName)), ".mp3") && isLikelyMP3FrameHeader(header) {
+		return "audio/mpeg"
+	}
 	if len(header) == 0 {
 		return normalizeDetectedMIME(declared, fileName)
 	}
 	return normalizeDetectedMIME(http.DetectContentType(header), fileName)
+}
+
+func isLikelyMP3FrameHeader(header []byte) bool {
+	if len(header) < 4 || header[0] != 0xff || header[1]&0xe0 != 0xe0 {
+		return false
+	}
+	if header[1]&0x06 == 0 {
+		return false
+	}
+	bitrateIndex := header[2] >> 4
+	sampleRateIndex := (header[2] >> 2) & 0x03
+	return bitrateIndex != 0 && bitrateIndex != 0x0f && sampleRateIndex != 0x03
 }
 
 func inferFileCategory(mimeType string, fileName string) string {
