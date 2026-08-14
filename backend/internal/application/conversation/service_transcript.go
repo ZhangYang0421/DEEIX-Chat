@@ -29,8 +29,8 @@ type TranscriptPatch struct {
 }
 
 type TranscriptSegmentPatch struct {
-	SegmentID string `json:"segmentID"`
-	Text      string `json:"text"`
+	SegmentID string
+	Text      string
 }
 
 func (s *Service) GetFileTranscript(ctx context.Context, userID uint, fileID string) (*TranscriptResult, error) {
