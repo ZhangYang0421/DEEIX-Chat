@@ -59,9 +59,19 @@ type GenerationStreamCacheRepository interface {
 	ExpireGenerationStream(ctx context.Context, runID string, ttl time.Duration) error
 }
 
+// UserSettingCacheRepository 封装用户会话设置的共享缓存能力。
+// Version 是带 TTL 的不透明令牌；Advance 必须替换当前令牌，数据按令牌隔离。
+type UserSettingCacheRepository interface {
+	GetUserSettingCacheVersion(ctx context.Context, userID uint, key string, ttl time.Duration) (string, error)
+	AdvanceUserSettingCacheVersion(ctx context.Context, userID uint, key string, ttl time.Duration) (string, error)
+	GetUserSettingCache(ctx context.Context, userID uint, key, version string) (value string, ok bool, err error)
+	SetUserSettingCache(ctx context.Context, userID uint, key, version, value string, ttl time.Duration) error
+}
+
 // ConversationCacheRepository 聚合 conversation 领域缓存能力。
 type ConversationCacheRepository interface {
 	FileProcessingQueueRepository
 	RAGCacheRepository
 	GenerationStreamCacheRepository
+	UserSettingCacheRepository
 }

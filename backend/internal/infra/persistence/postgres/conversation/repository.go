@@ -3388,6 +3388,27 @@ func (r *Repo) GetUserSettingValue(ctx context.Context, userID uint, key string)
 	return item.Value, nil
 }
 
+// GetUserSettingValues 批量查询指定用户的配置值，缺失的 key 返回空字符串。
+func (r *Repo) GetUserSettingValues(ctx context.Context, userID uint, keys []string) (map[string]string, error) {
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		values[key] = ""
+	}
+	if len(keys) == 0 {
+		return values, nil
+	}
+	var items []models.UserSetting
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND key IN ?", userID, keys).
+		Find(&items).Error; err != nil {
+		return nil, translateError(err)
+	}
+	for _, item := range items {
+		values[item.Key] = item.Value
+	}
+	return values, nil
+}
+
 // GetFileObjectsByInternalIDs 按内部主键 ID 批量查询文件对象。
 func (r *Repo) GetFileObjectsByInternalIDs(ctx context.Context, userID uint, ids []uint) ([]domainconversation.FileObject, error) {
 	items := make([]models.FileObject, 0)

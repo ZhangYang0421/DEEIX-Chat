@@ -155,6 +155,12 @@
     "thinking": {
       "active": "Thinking",
       "done": "Thinking complete"
+    },
+    "diagram": {
+      "downloadDiagram": "Download diagram",
+      "downloadDiagramAsSvg": "Download diagram as SVG",
+      "downloadDiagramAsPng": "Download diagram as PNG",
+      "downloadDiagramAsMmd": "Download diagram as MMD"
     }
   },
   "artifacts": {

@@ -119,7 +119,6 @@ type Service struct {
 	generationStreams *generationStreamRegistry
 	snapshotCache     sync.Map // conversationID (uint) → *cachedSnapshot
 	userMemCache      sync.Map // userID (uint) → *cachedUserMemories
-	userSettingCache  sync.Map // "userID:key" (string) → *cachedUserSetting
 	imageContextCache *preparedConversationImageCache
 }
 

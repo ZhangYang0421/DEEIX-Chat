@@ -130,4 +130,5 @@ func (input UpdateFileObjectProcessingInput) IsZero() bool {
 // ConversationSettingsRepository 封装会话域设置读取能力。
 type ConversationSettingsRepository interface {
 	GetUserSettingValue(ctx context.Context, userID uint, key string) (string, error)
+	GetUserSettingValues(ctx context.Context, userID uint, keys []string) (map[string]string, error)
 }

@@ -155,6 +155,12 @@
     "thinking": {
       "active": "正在思考",
       "done": "思考完成"
+    },
+    "diagram": {
+      "downloadDiagram": "下载图表",
+      "downloadDiagramAsSvg": "导出为 SVG",
+      "downloadDiagramAsPng": "导出为 PNG",
+      "downloadDiagramAsMmd": "导出为 MMD 源码"
     }
   },
   "artifacts": {
