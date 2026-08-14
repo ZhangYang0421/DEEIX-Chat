@@ -2898,15 +2898,33 @@ func getOrInitQuotaForUpdate(tx *gorm.DB, userID uint, defaultQuotaBytes int64) 
 	return &quota, nil
 }
 
-// UpdateFileObjectEmbedStatus 更新文件对象的 embedding 状态及分片数量。
+// UpdateFileObjectEmbedStatus 更新文件对象的 embedding 状态及 RAG 可用状态。
 func (r *Repo) UpdateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, status string, embedErr string) error {
+	ragReady, ragReason := embeddingRAGState(status)
 	return translateError(r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
 		Where("user_id = ? AND file_id = ?", userID, fileID).
 		Updates(map[string]interface{}{
 			"embed_status": status,
 			"embed_error":  embedErr,
+			"rag_ready":    ragReady,
+			"rag_reason":   ragReason,
 		}).Error)
+}
+
+func embeddingRAGState(status string) (bool, string) {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "ready":
+		return true, "ready"
+	case "processing":
+		return false, "embedding_processing"
+	case "failed":
+		return false, "embedding_failed"
+	case "stale":
+		return false, "embedding_stale"
+	default:
+		return false, "embedding_pending"
+	}
 }
 
 // UpdateFileObjectChunkCount 在 embedding 完成后更新分片数量。
@@ -2931,6 +2949,8 @@ func (r *Repo) CloneFileEmbeddingArtifacts(ctx context.Context, source *domainco
 			Updates(map[string]interface{}{
 				"embed_status": "ready",
 				"embed_error":  "",
+				"rag_ready":    true,
+				"rag_reason":   "ready",
 				"page_count":   sourceEntity.PageCount,
 				"chunk_count":  sourceEntity.ChunkCount,
 				"extracted_at": sourceEntity.ExtractedAt,
@@ -4568,6 +4588,8 @@ func (r *Repo) MarkAllEmbeddedFilesStale(ctx context.Context) (int64, error) {
 		Updates(map[string]interface{}{
 			"embed_status": "stale",
 			"embed_error":  "embedding model changed, reindex required",
+			"rag_ready":    false,
+			"rag_reason":   "embedding_stale",
 		})
 	return result.RowsAffected, translateError(result.Error)
 }
@@ -4593,6 +4615,8 @@ func (r *Repo) MarkTimedOutFileEmbeddingsFailed(ctx context.Context, userID uint
 		Updates(map[string]interface{}{
 			"embed_status":             "failed",
 			"embed_error":              truncateText(message, 255),
+			"rag_ready":                false,
+			"rag_reason":               "embedding_failed",
 			"processing_status":        gorm.Expr("CASE WHEN processing_status = ? THEN ? ELSE processing_status END", "embedding", "ready"),
 			"processing_ready":         gorm.Expr("CASE WHEN processing_status = ? THEN ? ELSE processing_ready END", "embedding", true),
 			"processing_error_code":    gorm.Expr("CASE WHEN processing_status = ? THEN ? ELSE processing_error_code END", "embedding", "embed_failed"),
