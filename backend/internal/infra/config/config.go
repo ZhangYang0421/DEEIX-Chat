@@ -1141,6 +1141,31 @@ func (c Config) TrustedProxyList() []string {
 	return splitCommaSeparated(c.TrustedProxies)
 }
 
+// EffectiveEmbeddingKey 返回 Embedding 请求使用的鉴权 Key。
+// 一般服务使用动态配置的 EmbeddingKey；DashScope 官方兼容 endpoint 在未单独配置 key 时，
+// 受限复用部署级 DASHSCOPE_API_KEY，避免把供应商密钥写入后台设置或前端。
+func (c Config) EffectiveEmbeddingKey() string {
+	if key := strings.TrimSpace(c.EmbeddingKey); key != "" {
+		return key
+	}
+	if strings.TrimSpace(c.DashScopeAPIKey) == "" || !isDashScopeCompatibleEmbeddingHost(c.EmbeddingHost) {
+		return ""
+	}
+	return strings.TrimSpace(c.DashScopeAPIKey)
+}
+
+func isDashScopeCompatibleEmbeddingHost(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Port() != "" {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if host != "dashscope.aliyuncs.com" && !strings.HasSuffix(host, ".maas.aliyuncs.com") {
+		return false
+	}
+	return strings.TrimRight(u.EscapedPath(), "/") == "/compatible-mode/v1"
+}
+
 // TrustedOutboundPolicy 返回部署级集成和可信私网重定向使用的全局 SSRF 白名单策略。
 // 管理员保存的模型、MCP、Embedding 和身份源 endpoint 由对应适配器按精确 origin 局部授权；
 // 只有跨 origin 的私网重定向目标需要显式进入全局白名单。

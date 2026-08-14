@@ -21,6 +21,64 @@ func TestLoadReadsDashScopeEnvironment(t *testing.T) {
 	}
 }
 
+func TestEffectiveEmbeddingKeyReusesDashScopeEnvironmentOnlyForOfficialEndpoint(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{
+			name: "explicit key wins",
+			cfg: Config{
+				EmbeddingHost:   "https://embedding.example.com/v1",
+				EmbeddingKey:    "configured-key",
+				DashScopeAPIKey: "dashscope-key",
+			},
+			want: "configured-key",
+		},
+		{
+			name: "dashscope global endpoint",
+			cfg: Config{
+				EmbeddingHost:   "https://dashscope.aliyuncs.com/compatible-mode/v1",
+				DashScopeAPIKey: "dashscope-key",
+			},
+			want: "dashscope-key",
+		},
+		{
+			name: "dashscope workspace endpoint",
+			cfg: Config{
+				EmbeddingHost:   "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/",
+				DashScopeAPIKey: "dashscope-key",
+			},
+			want: "dashscope-key",
+		},
+		{
+			name: "unrelated endpoint does not inherit key",
+			cfg: Config{
+				EmbeddingHost:   "https://embedding.example.com/compatible-mode/v1",
+				DashScopeAPIKey: "dashscope-key",
+			},
+			want: "",
+		},
+		{
+			name: "insecure endpoint does not inherit key",
+			cfg: Config{
+				EmbeddingHost:   "http://dashscope.aliyuncs.com/compatible-mode/v1",
+				DashScopeAPIKey: "dashscope-key",
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.EffectiveEmbeddingKey(); got != tt.want {
+				t.Fatalf("EffectiveEmbeddingKey() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadDefaultsUseBootstrapAdmin(t *testing.T) {
 	cleanupConfigEnv(t)
 	chdir(t, t.TempDir())

@@ -354,7 +354,7 @@ func resolveEmbeddingUpstream(cfg config.Config) (string, string, error) {
 	if strings.TrimSpace(cfg.EmbeddingHost) == "" {
 		return "", "", fmt.Errorf("file.embedding_host is required")
 	}
-	return strings.TrimRight(strings.TrimSpace(cfg.EmbeddingHost), "/"), strings.TrimSpace(cfg.EmbeddingKey), nil
+	return strings.TrimRight(strings.TrimSpace(cfg.EmbeddingHost), "/"), cfg.EffectiveEmbeddingKey(), nil
 }
 
 func normalizeEmbeddingBatchDimensions(embeddings [][]float32, outputDimensions int) [][]float32 {

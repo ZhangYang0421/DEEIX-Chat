@@ -314,7 +314,7 @@ func (s *Service) embedTexts(ctx context.Context, texts []string) ([][]float32, 
 	}
 
 	apiBase := strings.TrimRight(host, "/")
-	apiKey := strings.TrimSpace(cfg.EmbeddingKey)
+	apiKey := cfg.EffectiveEmbeddingKey()
 	batchSize := cfg.EmbedBatchSize
 	if batchSize <= 0 {
 		batchSize = 20
