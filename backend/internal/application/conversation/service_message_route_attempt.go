@@ -80,7 +80,7 @@ func (s *Service) buildMessageRoutePrompt(ctx context.Context, route *channel.Re
 		assembler.Add(ContextSlot{Kind: SlotPreference, Content: input.PreferencePrompt})
 	}
 	baseMessages, _ := assembler.Assemble(historyMessages)
-	return buildPromptPlan(ctx, promptPlanInput{
+	plan := buildPromptPlan(ctx, promptPlanInput{
 		BaseMessages:      baseMessages,
 		StableAttachments: input.StableAttachments,
 		DynamicContext:    input.DynamicContext,
@@ -88,5 +88,20 @@ func (s *Service) buildMessageRoutePrompt(ctx context.Context, route *channel.Re
 		ToolRuntime:       input.ToolRuntime,
 		Config:            input.Config,
 		StoreProvider:     s.storeProvider,
-	}), nil
+	})
+	if !llm.ModelAllowsInputModality(route.ModelCapabilitiesJSON, llm.ModelInputModalityImage) && promptMessagesContainImage(plan.Messages) {
+		return PromptPlan{}, ErrModelImageInputUnsupported
+	}
+	return plan, nil
+}
+
+func promptMessagesContainImage(messages []llm.Message) bool {
+	for _, message := range messages {
+		for _, part := range message.Parts {
+			if part.Kind == llm.ContentPartImage {
+				return true
+			}
+		}
+	}
+	return false
 }

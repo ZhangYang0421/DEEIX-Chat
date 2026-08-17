@@ -175,6 +175,7 @@
   "llm": {
     "apiKeysRequired": "API Keys 不能为空。",
     "emptyResponse": "模型返回了空响应。",
+    "imageInputUnsupported": "当前模型不支持图片输入，请更换支持视觉的模型，或选择图片附件处理器后重试。",
     "invalidAdapter": "接口协议不受支持，请重新选择协议。",
     "invalidApiKeysConfig": "API Keys 配置无效。",
     "invalidCompatible": "兼容模式无效。",

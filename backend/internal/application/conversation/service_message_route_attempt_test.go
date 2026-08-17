@@ -1,6 +1,8 @@
 package conversation
 
 import (
+	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -8,6 +10,7 @@ import (
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
 )
 
 func TestBuildMessageRoutePromptRebuildsRouteSpecificFields(t *testing.T) {
@@ -61,6 +64,71 @@ func TestBuildMessageRoutePromptRebuildsRouteSpecificFields(t *testing.T) {
 	latest := interactionPlan.Messages[len(interactionPlan.Messages)-1]
 	if latest.Role != "user" || !strings.Contains(latest.Content, "platform policy") || !strings.Contains(latest.Content, "follow up") {
 		t.Fatalf("expected inlined system prompt on latest user message, got %#v", latest)
+	}
+}
+
+func TestBuildMessageRoutePromptRejectsHistoricalImagesForTextOnlyModel(t *testing.T) {
+	store := objectstore.NewLocal(t.TempDir())
+	if _, err := store.Put(t.Context(), "images/one", bytes.NewReader([]byte("image-one")), objectstore.PutOptions{ContentType: "image/png"}); err != nil {
+		t.Fatalf("put historical image: %v", err)
+	}
+	service := &Service{
+		storeProvider:     &conversationTestStoreProvider{store: store},
+		imageContextCache: defaultPreparedConversationImageCache(),
+	}
+	input := messageRoutePromptInput{
+		UserContent: "继续分析",
+		DomainMessages: []model.Message{
+			{Role: "user", Content: "描述图片", Attachments: `[{"file_id":"image-1","kind":"image","mime_type":"image/png"}]`},
+			{Role: "assistant", Content: "图片描述"},
+			{Role: "user", Content: "继续分析"},
+		},
+		StableAttachments: []AttachmentInput{{
+			FileID: "image-1", Kind: "image", MimeType: "image/png", StoragePath: "images/one", ContextMode: fileContextModeDirectImage,
+		}},
+		Config: config.Config{},
+	}
+
+	_, err := service.buildMessageRoutePrompt(t.Context(), &channel.ResolvedRoute{
+		UpstreamModel:         "deepseek-chat",
+		ModelCapabilitiesJSON: `{"inputModalities":["text"]}`,
+	}, input)
+	if !errors.Is(err, ErrModelImageInputUnsupported) {
+		t.Fatalf("expected text-only route to reject historical image input, got %v", err)
+	}
+	if code := classifyRunErrorCode(err); code != MessageErrorCodeModelImageInputUnsupported {
+		t.Fatalf("unexpected persisted image input error code: %q", code)
+	}
+}
+
+func TestBuildMessageRoutePromptAllowsConfiguredImageInput(t *testing.T) {
+	store := objectstore.NewLocal(t.TempDir())
+	if _, err := store.Put(t.Context(), "images/one", bytes.NewReader([]byte("image-one")), objectstore.PutOptions{ContentType: "image/png"}); err != nil {
+		t.Fatalf("put historical image: %v", err)
+	}
+	service := &Service{
+		storeProvider:     &conversationTestStoreProvider{store: store},
+		imageContextCache: defaultPreparedConversationImageCache(),
+	}
+	plan, err := service.buildMessageRoutePrompt(t.Context(), &channel.ResolvedRoute{
+		UpstreamModel:         "vision-chat",
+		ModelCapabilitiesJSON: `{"inputModalities":["text","image"]}`,
+	}, messageRoutePromptInput{
+		UserContent: "继续分析",
+		DomainMessages: []model.Message{
+			{Role: "user", Content: "描述图片", Attachments: `[{"file_id":"image-1","kind":"image","mime_type":"image/png"}]`},
+			{Role: "user", Content: "继续分析"},
+		},
+		StableAttachments: []AttachmentInput{{
+			FileID: "image-1", Kind: "image", MimeType: "image/png", StoragePath: "images/one", ContextMode: fileContextModeDirectImage,
+		}},
+		Config: config.Config{},
+	})
+	if err != nil {
+		t.Fatalf("build image-capable prompt: %v", err)
+	}
+	if !promptMessagesContainImage(plan.Messages) {
+		t.Fatalf("expected configured image input to remain in prompt: %#v", plan.Messages)
 	}
 }
 

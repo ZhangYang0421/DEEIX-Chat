@@ -34,6 +34,7 @@ import type { NativeToolDefinition } from "@/shared/lib/model-option-policy";
 import { MODEL_OPTION_POLICY_PROTOCOL_LABELS, resolveModelOptionPolicyProtocol } from "@/shared/lib/model-option-policy";
 
 export const MODEL_CAPABILITIES_PLACEHOLDER = `{
+  "inputModalities": ["text", "image"],
   "defaultOptions": {},
   "nativeTools": [
     {
@@ -1017,6 +1018,7 @@ export function ModelCapabilitiesGuideButton({ t }: { t: (key: string) => string
             <p className="text-xs">{t("sheet.capabilitiesGuide.defaultsDescription")}</p>
             <pre className="max-h-72 overflow-auto rounded-md bg-muted/50 p-3 text-xs text-foreground">
 {`{
+  "inputModalities": ["text", "image"],
   "defaultOptions": {
     "store": false,
     "reasoning": {

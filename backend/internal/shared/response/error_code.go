@@ -156,6 +156,7 @@ var exactErrorSpecs = map[string]errorSpec{
 	"too many selected tools":                                 {Code: "message.too_many_selected_tools", Message: "too many selected tools"},
 	"multiple image attachment processors selected":           {Code: "message.multiple_image_processors", Message: "select only one image attachment processor"},
 	"image attachment processing failed":                      {Code: "mcp.image_processing_failed", Message: "image processing tool failed"},
+	"model does not support image input":                      {Code: "llm.image_input_unsupported", Message: "selected model does not support image input"},
 	"too many selected skills":                                {Code: "message.too_many_selected_skills", Message: "too many selected skills"},
 	"generation stream not found":                             {Code: "conversation_run.stream_not_found", Message: "generation stream not found"},
 	"image prompt is required":                                {Code: "media.image_prompt_required", Message: "image prompt is required"},

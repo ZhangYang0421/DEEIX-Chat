@@ -175,6 +175,7 @@
   "llm": {
     "apiKeysRequired": "API keys are required.",
     "emptyResponse": "The model returned an empty response.",
+    "imageInputUnsupported": "This model does not support image input. Choose a vision-capable model or an image attachment processor, then try again.",
     "invalidAdapter": "This interface protocol is not supported. Choose another protocol.",
     "invalidApiKeysConfig": "Invalid API keys configuration.",
     "invalidCompatible": "Invalid compatibility mode.",

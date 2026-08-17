@@ -12,6 +12,8 @@ type ModelCaps struct {
 	MaxOutputTokens int
 }
 
+const ModelInputModalityImage = "image"
+
 // autocompactBufferTokens 是预留给系统开销与安全缓冲的 Token 数量。
 // 参考 claude-code autoCompact.ts 中的 AUTOCOMPACT_BUFFER_TOKENS = 13_000。
 const autocompactBufferTokens = 13_000
@@ -117,6 +119,38 @@ func positiveInt(value interface{}) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// ModelAllowsInputModality 返回模型能力是否允许指定输入模态。
+// 未配置 inputModalities 时保持历史兼容；显式配置但格式无效时拒绝该模态。
+func ModelAllowsInputModality(capabilitiesJSON string, modality string) bool {
+	requested := strings.ToLower(strings.TrimSpace(modality))
+	if requested == "" {
+		return false
+	}
+	raw := strings.TrimSpace(capabilitiesJSON)
+	if raw == "" {
+		return true
+	}
+	payload := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return true
+	}
+	configured, exists := payload["inputModalities"]
+	if !exists {
+		return true
+	}
+	items, ok := configured.([]interface{})
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		value, ok := item.(string)
+		if ok && strings.EqualFold(strings.TrimSpace(value), requested) {
+			return true
+		}
+	}
+	return false
 }
 
 // EffectiveContextBudget 返回上下文组装可用的最大 Token 数。

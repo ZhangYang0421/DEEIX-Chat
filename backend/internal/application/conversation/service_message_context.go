@@ -19,7 +19,10 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/conv"
 )
 
-const MessageErrorCodeMediaImageStreamUnsupported = "media.image_stream_unsupported"
+const (
+	MessageErrorCodeMediaImageStreamUnsupported = "media.image_stream_unsupported"
+	MessageErrorCodeModelImageInputUnsupported  = "llm.image_input_unsupported"
+)
 
 const (
 	maxConversationImageContextCount = 10
@@ -201,6 +204,8 @@ func classifyRunErrorCode(err error) string {
 		return "file_too_large"
 	case errors.Is(err, ErrModelRouteNotConfigured):
 		return "model_route_not_configured"
+	case errors.Is(err, ErrModelImageInputUnsupported):
+		return MessageErrorCodeModelImageInputUnsupported
 	case errors.Is(err, ErrUpstreamEmptyResponse):
 		return "upstream_empty_response"
 	case errors.Is(err, ErrToolRunFinalAnswerMissing):
@@ -494,6 +499,9 @@ func MessageErrorCode(err error) string {
 	}
 	if errors.Is(err, ErrGeneratedMediaArtifactUnavailable) {
 		return MessageErrorCodeMediaArtifactUnavailable
+	}
+	if errors.Is(err, ErrModelImageInputUnsupported) {
+		return MessageErrorCodeModelImageInputUnsupported
 	}
 	var upstreamErr *llm.UpstreamError
 	if errors.As(err, &upstreamErr) && isImageStreamConfigurationFailure(upstreamErr) {

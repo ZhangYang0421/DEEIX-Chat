@@ -225,7 +225,7 @@ geoip:
 
 文件链路支持三类上下文策略：
 
-- 图片：默认按模型能力直接传原图上下文；开启图片 OCR 后进入 OCR 文本提取链路。
+- 图片：未配置模型能力 `inputModalities` 时保持历史兼容并直接传入原图；显式包含 `image` 时允许原图输入；仅声明 `text` 时，后端会拒绝最终上下文中的原图（包括历史图片），并提示更换视觉模型或选择图片附件处理器。图片附件处理器可先将图片转换为文本，再交给仅文本模型。
 - 文本类文件：小文件可全文注入；超出阈值时按配置走 RAG 或回退策略。
 - PDF/Office 等文档：通过内置提取、Tika、Docling、MinerU 或 OCR 引擎提取文本；PDF OCR 回退可单独控制。
 
@@ -239,11 +239,28 @@ OCR 引擎配置由后台文件设置管理，当前支持 RapidOCR、Tesseract 
 
 模型能力 JSON 支持：
 
+- `inputModalities`：声明聊天模型接受的输入模态。仅文本模型配置为 `["text"]`；支持图片输入的模型配置为 `["text", "image"]`。未配置时保持历史兼容行为。显式配置 `inputModalities` 且最终发送上下文仍包含原图，但列表中不含 `image` 时，后端返回 `llm.image_input_unsupported`；显式图片附件处理器已将图片转成文本时不受影响。
 - `defaultOptions`：写入用户侧默认参数 JSON，并作为请求参数来源。
 - `lockedOptionPaths`：声明不可由用户覆盖的参数路径；对应值仍从 `defaultOptions` 读取，后端发送前会恢复为管理员默认值。
 - `optionControls`：定义用户参数配置对话框的可视化控件，不会单独传给上游。
 - `nativeToolKeys`：定义当前模型允许的厂商官方原生工具，例如 OpenAI、xAI、Google 和 Anthropic 的原生搜索、代码执行或图片生成能力。
 - `image.stream`：仅对图像类模型能力生效；未配置时保持默认流式，显式写 `false` 时关闭图像流式调用。
+
+例如，仅文本模型可配置：
+
+```json
+{
+  "inputModalities": ["text"]
+}
+```
+
+支持视觉输入的聊天模型可配置：
+
+```json
+{
+  "inputModalities": ["text", "image"]
+}
+```
 
 用户手写 `tools` 时，只有命中 `nativeToolKeys` 的官方原生工具会作为官方工具保留，工具子参数会随该工具透传；普通用户不能通过 JSON 自行启用未被管理员允许的 MCP Tool 或官方原生工具。MCP Tool 仍必须由管理员在工具页配置和启用。
 

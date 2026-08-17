@@ -206,7 +206,10 @@ func TestSelectedToolRuntimeRejectsMultipleImageProcessors(t *testing.T) {
 
 func TestBuildMessageRoutePromptSkipsRawImagesAfterProcessorRouting(t *testing.T) {
 	service := &Service{}
-	plan, err := service.buildMessageRoutePrompt(t.Context(), &channel.ResolvedRoute{UpstreamModel: "text-only"}, messageRoutePromptInput{
+	plan, err := service.buildMessageRoutePrompt(t.Context(), &channel.ResolvedRoute{
+		UpstreamModel:         "text-only",
+		ModelCapabilitiesJSON: `{"inputModalities":["text"]}`,
+	}, messageRoutePromptInput{
 		UserContent: "继续分析",
 		DomainMessages: []domainconversation.Message{{
 			Role:        "user",

@@ -110,7 +110,24 @@ type streamError struct {
 	Message string
 }
 
+func mapModelImageInputUnsupportedError(err error) (status int, code string, message string, ok bool) {
+	if !errors.Is(err, appconversation.ErrModelImageInputUnsupported) {
+		return 0, "", "", false
+	}
+	return http.StatusBadRequest,
+		appconversation.MessageErrorCodeModelImageInputUnsupported,
+		appconversation.ErrModelImageInputUnsupported.Error(),
+		true
+}
+
 func mapStreamError(err error) streamError {
+	if status, code, message, ok := mapModelImageInputUnsupportedError(err); ok {
+		return streamError{
+			Status:  status,
+			Code:    code,
+			Message: response.PublicErrorMessage(status, code, message),
+		}
+	}
 	status := http.StatusInternalServerError
 	code := ""
 	message := "send message failed"

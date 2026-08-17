@@ -169,6 +169,37 @@ func TestMapStreamErrorClassifiesGeneratedMediaArtifactFailure(t *testing.T) {
 	}
 }
 
+func TestMapStreamErrorClassifiesModelImageInputUnsupported(t *testing.T) {
+	mapped := mapStreamError(appconversation.ErrModelImageInputUnsupported)
+	if mapped.Status != http.StatusBadRequest {
+		t.Fatalf("expected unsupported image input to be mapped to bad request, got status=%d", mapped.Status)
+	}
+	if mapped.Code != appconversation.MessageErrorCodeModelImageInputUnsupported {
+		t.Fatalf("unexpected image input error code: %#v", mapped)
+	}
+}
+
+func TestHandleSendMessageErrorClassifiesModelImageInputUnsupported(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/conversations/test/messages", nil)
+
+	handleSendMessageError(c, appconversation.ErrModelImageInputUnsupported)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected unsupported image input to return bad request, got status=%d body=%s", w.Code, w.Body.String())
+	}
+	var payload struct {
+		ErrorCode string `json:"errorCode"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if payload.ErrorCode != appconversation.MessageErrorCodeModelImageInputUnsupported {
+		t.Fatalf("unexpected image input error response: %#v", payload)
+	}
+}
+
 func TestMapBillingStreamErrorReturnsConcurrencyLimit(t *testing.T) {
 	mapped := mapBillingStreamError(appbilling.ErrUsageConcurrencyLimitExceeded)
 	if mapped.Status != http.StatusTooManyRequests || mapped.Code != "billing.concurrency_limit_exceeded" {

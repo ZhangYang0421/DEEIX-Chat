@@ -55,6 +55,8 @@ var (
 	ErrMultipleImageAttachmentProcessors = errors.New("multiple image attachment processors selected")
 	// ErrImageAttachmentProcessingFailed 图片附件处理器调用失败。
 	ErrImageAttachmentProcessingFailed = errors.New("image attachment processing failed")
+	// ErrModelImageInputUnsupported 当前模型不支持原始图片输入。
+	ErrModelImageInputUnsupported = errors.New("model does not support image input")
 	// ErrTooManySelectedSkills 单条消息选择的 Skill 数超限。
 	ErrTooManySelectedSkills = errors.New("too many selected skills")
 	// ErrSkillNotFound 技能不存在或当前用户不可用。

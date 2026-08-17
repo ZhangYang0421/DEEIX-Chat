@@ -355,6 +355,10 @@ func billingStreamErrorPayload(err error) map[string]interface{} {
 
 // handleSendMessageError 处理发送消息错误的公共方法。
 func handleSendMessageError(c *gin.Context, err error) {
+	if status, code, message, ok := mapModelImageInputUnsupportedError(err); ok {
+		response.ErrorWithCode(c, status, code, message)
+		return
+	}
 	switch {
 	case errors.Is(err, appconversation.ErrConversationNotFound):
 		response.Error(c, http.StatusNotFound, "conversation not found")
