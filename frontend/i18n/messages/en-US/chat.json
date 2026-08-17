@@ -236,6 +236,7 @@
   },
   "attachments": {
     "limitReached": "Attachment limit reached",
+    "modelImageUploadUnsupported": "This model does not support image uploads.",
     "maxUploadFiles": "Each message can include up to {count} files.",
     "policyRejected": "This file is not supported by the current chat capabilities.",
     "fileRejected": "{name}: {reason}",

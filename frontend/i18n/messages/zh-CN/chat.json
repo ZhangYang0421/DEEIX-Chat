@@ -236,6 +236,7 @@
   },
   "attachments": {
     "limitReached": "附件数量已达上限",
+    "modelImageUploadUnsupported": "当前模型不支持图片上传",
     "maxUploadFiles": "单条消息最多上传 {count} 个文件。",
     "policyRejected": "文件不符合当前聊天能力",
     "fileRejected": "{name}：{reason}",

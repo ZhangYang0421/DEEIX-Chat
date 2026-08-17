@@ -4,7 +4,7 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { resolveUploadPolicyRejection } from "@/features/chat/utils/attachments";
+import { inferUploadCategory, resolveUploadPolicyRejection } from "@/features/chat/utils/attachments";
 import { captureScreenshotFile } from "@/features/chat/utils/browser-media";
 import { resolveMaxFilesPerMessage } from "@/features/chat/utils/chat-runtime";
 import type {
@@ -30,11 +30,13 @@ function revokeAttachmentPreview(item: PendingAttachment) {
 export function useChatAttachments({
   conversationKey,
   attachments,
+  imageUploadsAllowed,
   setAttachments,
   appendAttachmentsForKey,
 }: {
   conversationKey: string;
   attachments: PendingAttachment[];
+  imageUploadsAllowed: boolean;
   setAttachments: React.Dispatch<React.SetStateAction<PendingAttachment[]>>;
   appendAttachmentsForKey: (conversationKey: string, items: PendingAttachment[]) => void;
 }) {
@@ -170,6 +172,15 @@ export function useChatAttachments({
       if (files.length === 0 || uploading) {
         return;
       }
+      const uploadCandidates = imageUploadsAllowed
+        ? files
+        : files.filter((file) => inferUploadCategory(file) !== "image");
+      if (uploadCandidates.length < files.length) {
+        toast.error(t("modelImageUploadUnsupported"));
+      }
+      if (uploadCandidates.length === 0) {
+        return;
+      }
       const targetConversationKey = conversationKey;
       const targetUploadingCount = uploadingByKey[targetConversationKey]?.length ?? 0;
       const remainingSlots = maxFilesPerMessage - attachments.length - targetUploadingCount;
@@ -186,7 +197,7 @@ export function useChatAttachments({
         fullContextLimitExceeded: (limit: string) => t("policy.fullContextLimitExceeded", { limit }),
         sizeLimitExceeded: (limit: string) => t("policy.sizeLimitExceeded", { limit }),
       };
-      for (const file of files) {
+      for (const file of uploadCandidates) {
         const rejection = resolveUploadPolicyRejection(file, chatFilePolicy, policyLabels);
         if (rejection) {
           toast.error(t("policyRejected"), {
@@ -312,6 +323,7 @@ export function useChatAttachments({
       attachments.length,
       chatFilePolicy,
       conversationKey,
+      imageUploadsAllowed,
       maxFilesPerMessage,
       releaseAttachments,
       resolveErrorMessage,

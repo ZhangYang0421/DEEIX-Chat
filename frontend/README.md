@@ -105,7 +105,7 @@ pnpm api:check
 
 Markdown 渲染统一使用聊天消息组件，支持基础 Markdown、代码块、表格、脚注、行内/块级公式、图片和链接外跳确认。
 
-模型能力 JSON 中的 `inputModalities` 声明聊天模型输入模态：`["text"]` 表示仅文本，`["text", "image"]` 表示支持原图输入；管理端前端负责展示和提交该字段，最终图片拦截由后端执行。`defaultOptions` 会写入用户侧参数 JSON；`optionControls` 只负责用户参数 Dialog 的可视化控件；`nativeToolKeys` 负责展示和提交管理员允许的官方原生工具。用户手写 JSON 时，前端保留用户输入，后端按模型能力和参数策略做最终治理。
+模型能力 JSON 中的 `inputModalities` 声明聊天模型输入模态：`["text"]` 表示仅文本，`["text", "image"]` 表示支持原图输入。对显式声明为仅文本的模型，前端会在选择、拖放、粘贴或附加原图时立即提示“当前模型不支持图片上传”并拦截；后端仍会检查最终 `PromptPlan` 作为兜底。未配置 `inputModalities` 时保持历史兼容；已选择图片附件处理器、由处理器将原图转换成文本时仍允许发送。`defaultOptions` 会写入用户侧参数 JSON；`optionControls` 只负责用户参数 Dialog 的可视化控件；`nativeToolKeys` 负责展示和提交管理员允许的官方原生工具。用户手写 JSON 时，前端保留用户输入，后端按模型能力和参数策略做最终治理。
 
 应用启动后会通过 `/api/v1/version` 获取 `buildID` 并写入本地缓存，随后低频检查版本变化。检测到新部署后，前端通过 toast 提示刷新，并提供刷新按钮。
 

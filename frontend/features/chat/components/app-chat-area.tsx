@@ -49,6 +49,8 @@ import {
 import { useChatData } from "@/features/chat/hooks/use-chat-data";
 import { useNewConversationDefaults } from "@/features/chat/hooks/use-new-conversation-defaults";
 import { toPendingAttachment } from "@/features/chat/model/message-submit";
+import { canAttachRawImages } from "@/features/chat/model/image-input-policy";
+import { isImageAttachmentLike } from "@/features/chat/utils/attachments";
 import { getConversation } from "@/shared/api/conversation";
 import { listAvailableMCPTools } from "@/shared/api/mcp";
 import { getUserSettings, patchUserSettings } from "@/shared/api/user-settings";
@@ -581,6 +583,11 @@ export function AppChatArea() {
     }
   }, [availableTools, defaultToolIDs, mcpMaxSelectedTools, t]);
 
+  const imageUploadsAllowed = React.useMemo(
+    () => canAttachRawImages(selectedModel, selectedToolIDs, availableTools),
+    [availableTools, selectedModel, selectedToolIDs],
+  );
+
   const {
     uploading,
     uploadingAttachments,
@@ -594,6 +601,7 @@ export function AppChatArea() {
   } = useChatAttachments({
     conversationKey,
     attachments,
+    imageUploadsAllowed,
     setAttachments,
     appendAttachmentsForKey,
   });
@@ -691,6 +699,17 @@ export function AppChatArea() {
 
   const onEditGeneratedImageAttachment = React.useCallback(
     (attachment: MessageAttachment, sourceModelName?: string) => {
+      const selectedSupportsImageEdit = selectedModel?.kinds.includes("image_edit") ?? false;
+      const normalizedSourceModelName = sourceModelName?.trim() || "";
+      const sourceModel = modelOptions.find(
+        (item) => item.platformModelName === normalizedSourceModelName && item.kinds.includes("image_edit"),
+      );
+      const fallbackModel = sourceModel ?? modelOptions.find((item) => item.kinds.includes("image_edit"));
+      if (!selectedSupportsImageEdit && !fallbackModel && !imageUploadsAllowed) {
+        toast.error(t("attachments.modelImageUploadUnsupported"));
+        return;
+      }
+
       const alreadyAttached = attachments.some((item) => item.fileID === attachment.fileID);
       if (!alreadyAttached && maxFilesPerMessage > 0 && attachments.length >= maxFilesPerMessage) {
         toast.error(t("attachments.limitReached"), {
@@ -707,21 +726,13 @@ export function AppChatArea() {
         return [...previous, pendingAttachment];
       });
 
-      const selectedSupportsImageEdit = selectedModel?.kinds.includes("image_edit") ?? false;
-      if (!selectedSupportsImageEdit) {
-        const normalizedSourceModelName = sourceModelName?.trim() || "";
-        const sourceModel = modelOptions.find(
-          (item) => item.platformModelName === normalizedSourceModelName && item.kinds.includes("image_edit"),
-        );
-        const fallbackModel = sourceModel ?? modelOptions.find((item) => item.kinds.includes("image_edit"));
-        if (fallbackModel) {
-          setSelectedPlatformModelName(fallbackModel.platformModelName);
-        }
+      if (!selectedSupportsImageEdit && fallbackModel) {
+        setSelectedPlatformModelName(fallbackModel.platformModelName);
       }
-
     },
     [
       attachments,
+      imageUploadsAllowed,
       maxFilesPerMessage,
       modelOptions,
       selectedModel,
@@ -735,6 +746,10 @@ export function AppChatArea() {
     (file: FileObjectDTO) => {
       const alreadyAttached = attachments.some((item) => item.fileID === file.fileID);
       if (alreadyAttached) {
+        return;
+      }
+      if (!imageUploadsAllowed && isImageAttachmentLike(file)) {
+        toast.error(t("attachments.modelImageUploadUnsupported"));
         return;
       }
       if (maxFilesPerMessage > 0 && attachments.length >= maxFilesPerMessage) {
@@ -770,7 +785,7 @@ export function AppChatArea() {
         ];
       });
     },
-    [attachments, maxFilesPerMessage, setAttachments, t],
+    [attachments, imageUploadsAllowed, maxFilesPerMessage, setAttachments, t],
   );
 
   React.useEffect(() => {

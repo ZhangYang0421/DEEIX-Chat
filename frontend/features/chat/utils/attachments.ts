@@ -37,6 +37,7 @@ const TEXT_FILE_EXTENSIONS = [
 ] as const;
 
 const ACTIVE_FILE_EXTENSIONS = new Set(["html", "htm", "css", "js", "jsx", "mjs", "ts", "tsx", "xml", "xhtml", "svg"]);
+const IMAGE_FILE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "ico", "jpeg", "jpg", "png", "tif", "tiff", "webp"]);
 
 const ACTIVE_UPLOAD_MIMES = new Set([
   "text/html",
@@ -125,6 +126,31 @@ export function isAllowedUploadMime(file: File, policy: ChatFilePolicyDTO | null
   return Boolean(mime && allowed.has(mime));
 }
 
+export type ImageAttachmentLike = {
+  fileName?: string;
+  fileCategory?: string;
+  mimeType?: string;
+  detectedMime?: string;
+  detectedMIME?: string;
+};
+
+export function isImageAttachmentLike(file: ImageAttachmentLike): boolean {
+  const extension = resolveFileExtension(file.fileName ?? "");
+  const mimeValues = [file.mimeType, file.detectedMime, file.detectedMIME]
+    .map((value) => normalizeMimeValue(value ?? ""))
+    .filter(Boolean);
+  if (ACTIVE_FILE_EXTENSIONS.has(extension) || mimeValues.some((mime) => ACTIVE_UPLOAD_MIMES.has(mime))) {
+    return false;
+  }
+  if (file.fileCategory?.trim().toLowerCase() === "image") {
+    return true;
+  }
+  if (IMAGE_FILE_EXTENSIONS.has(extension)) {
+    return true;
+  }
+  return mimeValues.some((mime) => mime.startsWith("image/"));
+}
+
 export function inferUploadCategory(file: File): UploadCategory {
   const mime = normalizeUploadMimeForPolicy(file);
   const ext = resolveFileExtension(file.name);
@@ -133,7 +159,7 @@ export function inferUploadCategory(file: File): UploadCategory {
     return "text";
   }
 
-  if (mime.startsWith("image/")) {
+  if (mime.startsWith("image/") || IMAGE_FILE_EXTENSIONS.has(ext)) {
     return "image";
   }
   if (

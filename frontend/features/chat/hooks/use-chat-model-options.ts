@@ -55,6 +55,23 @@ function parseJSONObject(raw: string): Record<string, unknown> | null {
   }
 }
 
+function resolveInputModalities(raw: string): string[] | null {
+  const parsed = parseJSONObject(raw);
+  if (!parsed || !Object.prototype.hasOwnProperty.call(parsed, "inputModalities")) {
+    return null;
+  }
+  if (!Array.isArray(parsed.inputModalities)) {
+    return [];
+  }
+  return Array.from(
+    new Set(
+      parsed.inputModalities
+        .map((item) => (typeof item === "string" ? item.trim().toLowerCase() : ""))
+        .filter(Boolean),
+    ),
+  );
+}
+
 function resolveChatContentWidth(settings: Record<string, string>): ChatContentWidth {
   return parseChatContentWidth(settings["chat.content_width"]);
 }
@@ -316,6 +333,7 @@ function toChatModelOption(item: PublicModelDTO): ChatModelOption {
     displayGroupIcon: item.displayGroupIcon,
     kinds: parseKindsJSON(item.kindsJSON),
     protocols: parseProtocolsJSON(item.protocolsJSON),
+    inputModalities: resolveInputModalities(item.capabilitiesJSON),
     defaultOptions: resolveDefaultOptions(item.capabilitiesJSON),
     optionControls: resolveOptionControls(item.capabilitiesJSON),
     lockedOptionPaths: resolveLockedOptionPaths(item.capabilitiesJSON),

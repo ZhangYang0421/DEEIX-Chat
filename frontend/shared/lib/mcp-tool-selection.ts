@@ -1,5 +1,10 @@
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 
+export function hasSelectedImageAttachmentProcessor(toolIDs: number[], tools: MCPToolDTO[]): boolean {
+  const selectedIDs = new Set(toolIDs);
+  return tools.some((tool) => selectedIDs.has(tool.id) && tool.attachmentInputMode === "image");
+}
+
 export function hasMultipleImageAttachmentProcessors(toolIDs: number[], tools: MCPToolDTO[]): boolean {
   const selectedIDs = new Set(toolIDs);
   let processorCount = 0;

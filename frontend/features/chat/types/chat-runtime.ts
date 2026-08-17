@@ -24,6 +24,7 @@ export type ChatModelOption = {
   displayGroupIcon: string;
   kinds: string[];
   protocols: string[];
+  inputModalities: string[] | null;
   defaultOptions: ConversationOptions;
   optionControls: ModelOptionControl[];
   lockedOptionPaths: string[];
