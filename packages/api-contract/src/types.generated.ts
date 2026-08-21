@@ -8346,7 +8346,7 @@ export namespace Files {
   }
 
   /**
-   * @description 上传对话附件文件，统一存储并扣减用户配额（默认100MB）
+   * @description 上传对话附件文件，统一存储并扣减用户配额（默认10GB）
    * @tags chat
    * @name FilesCreate
    * @summary 上传文件
