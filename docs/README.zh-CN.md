@@ -490,6 +490,10 @@ Web、App 与桌面端会自动复用当前实例的这个回调。外部身份�
 - [管理指南](https://deeix.com/zh/docs/deeix-chat/admin-accounts)
 - [进阶指南](https://deeix.com/zh/docs/deeix-chat/advanced-capabilities-passthrough-tools)
 
+### MCP 默认工具
+
+管理员在后台启用 MCP 后，打开聊天输入框的 MCP 插头菜单，即可选择当前会话要使用的工具。工具右侧的星标用于设置该工具的默认使用；MCP Server 行右侧的星标会将该 Server 当前列出的全部工具设为默认。复选框只影响当前会话，星标保存到当前用户的 `chat.default_mcp_tool_ids`，并仅在新建对话时自动带入；已有会话不会被修改。项目设置为 `mcpDefaultMode=custom`（项目自定义 MCP）时，会覆盖当前用户的个人默认工具；选择“继承全局”时则沿用用户在聊天 MCP 菜单中的星标默认。
+
 ## 开发与验证
 
 在仓库根目录安装依赖后执行工作区检查：

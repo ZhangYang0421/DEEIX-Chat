@@ -24,6 +24,8 @@ DEEIX Chat 前端是基于 Next.js App Router 的管理与对话界面，负责�
 - `features/files`：文件管理、上传状态、文件卡片、预览、单个/批量删除和存储配额展示
 - `features/settings`：用户侧通用、偏好、订阅和账户设置
 - `features/admin`：后台账户、上游、模型、计费、日志、身份源、登录、会话、文件、官方原生工具计费和 MCP 工具设置
+
+MCP 默认使用：管理员在 `/admin/tools` 启用 MCP 后，用户打开聊天输入框的 MCP 插头菜单，点击工具右侧星标即可保存该工具为默认工具；点击 MCP Server 行右侧星标则会将该 Server 当前列出的全部工具设为默认。复选框只影响当前会话；星标保存到用户设置 `chat.default_mcp_tool_ids`，仅对新建对话生效，已有会话不变。项目使用 `mcpDefaultMode=custom` 时会覆盖用户默认 MCP，使用继承模式时沿用用户星标默认。
 - `shared/api/`：API 请求封装与通用类型
 - `shared/auth/`：会话 token、登录态与鉴权辅助
 - `shared/hooks/`：跨业务复用 hooks
