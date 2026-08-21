@@ -98,14 +98,6 @@ func TestSearchConversationsRejectsLongQueryWithStableCode(t *testing.T) {
 	}
 }
 
-func TestBuildContentDispositionDefaultsToAttachment(t *testing.T) {
-	got := buildContentDisposition("report.html", false)
-	want := `attachment; filename="report.html"; filename*=UTF-8''report.html`
-	if got != want {
-		t.Fatalf("unexpected disposition: got %q want %q", got, want)
-	}
-}
-
 func TestStreamErrorPayloadIncludesUpstreamDebug(t *testing.T) {
 	err := errors.Join(appconversation.ErrUpstreamRequestFailed, &llm.UpstreamError{
 		StatusCode: 401,

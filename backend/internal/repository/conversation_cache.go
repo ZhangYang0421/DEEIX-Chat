@@ -24,6 +24,19 @@ type GenerationStreamMessage struct {
 	PayloadJSON string
 }
 
+// GenerationStreamAppend 是一次原子追加所需的数据。
+// TextDelta 仅在可见文本 delta 事件中设置，用于同步维护完整恢复快照。
+type GenerationStreamAppend struct {
+	PayloadJSON string
+	TextDelta   string
+}
+
+// GenerationStreamTextSnapshot 是生成期间可恢复的完整可见文本及其事件序号。
+type GenerationStreamTextSnapshot struct {
+	Seq     int64
+	Content string
+}
+
 // FileProcessingQueueRepository 封装文件处理队列缓存能力。
 type FileProcessingQueueRepository interface {
 	InitFileProcessingStream(ctx context.Context) error
@@ -50,7 +63,8 @@ type GenerationStreamCacheRepository interface {
 	IsGenerationStreamActive(ctx context.Context, runID string) (bool, error)
 	RequestGenerationStreamCancel(ctx context.Context, runID string, ttl time.Duration) error
 	IsGenerationStreamCanceled(ctx context.Context, runID string) (bool, error)
-	AppendGenerationStreamEvent(ctx context.Context, runID string, payloadJSON string, maxEvents int64, ttl time.Duration) (GenerationStreamMessage, error)
+	AppendGenerationStreamEvent(ctx context.Context, runID string, input GenerationStreamAppend, maxEvents int64, ttl time.Duration) (GenerationStreamMessage, error)
+	GetGenerationStreamTextSnapshot(ctx context.Context, runID string) (GenerationStreamTextSnapshot, bool, error)
 	ListGenerationStreamEvents(ctx context.Context, runID string, limit int64) ([]GenerationStreamMessage, error)
 	ReadGenerationStreamEvents(ctx context.Context, runID string, afterID string, block time.Duration, limit int64) ([]GenerationStreamMessage, error)
 	// ResetGenerationStreamEvents clears retained events while keeping owner metadata so

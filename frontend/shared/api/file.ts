@@ -32,6 +32,19 @@ export type FileContentResult = {
 
 export type RenameFileResult = FileObjectDTO;
 
+export async function readFileContentResponse(response: Response): Promise<FileContentResult> {
+  const blob = await response.blob();
+  const rawContentLength = response.headers.get("content-length");
+  const parsedContentLength = rawContentLength ? Number.parseInt(rawContentLength, 10) : Number.NaN;
+
+  return {
+    blob,
+    contentType: response.headers.get("content-type") || blob.type || "application/octet-stream",
+    disposition: response.headers.get("content-disposition"),
+    contentLength: Number.isFinite(parsedContentLength) ? parsedContentLength : blob.size || null,
+  };
+}
+
 // Upload
 export async function uploadFile(
   accessToken: string,
@@ -143,16 +156,7 @@ export async function fetchFileContent(accessToken: string, fileID: string): Pro
     true,
   );
 
-  const blob = await response.blob();
-  const rawContentLength = response.headers.get("content-length");
-  const parsedContentLength = rawContentLength ? Number.parseInt(rawContentLength, 10) : Number.NaN;
-
-  return {
-    blob,
-    contentType: response.headers.get("content-type") || blob.type || "application/octet-stream",
-    disposition: response.headers.get("content-disposition"),
-    contentLength: Number.isFinite(parsedContentLength) ? parsedContentLength : blob.size || null,
-  };
+  return readFileContentResponse(response);
 }
 
 export async function fetchSharedFileContent(shareID: string, fileID: string): Promise<FileContentResult> {
@@ -172,16 +176,7 @@ export async function fetchSharedFileContent(shareID: string, fileID: string): P
     throw new Error(message?.trim() || "Failed to load file");
   }
 
-  const blob = await response.blob();
-  const rawContentLength = response.headers.get("content-length");
-  const parsedContentLength = rawContentLength ? Number.parseInt(rawContentLength, 10) : Number.NaN;
-
-  return {
-    blob,
-    contentType: response.headers.get("content-type") || blob.type || "application/octet-stream",
-    disposition: response.headers.get("content-disposition"),
-    contentLength: Number.isFinite(parsedContentLength) ? parsedContentLength : blob.size || null,
-  };
+  return readFileContentResponse(response);
 }
 
 export async function fetchFileExtract(accessToken: string, fileID: string): Promise<FileExtractDTO> {
