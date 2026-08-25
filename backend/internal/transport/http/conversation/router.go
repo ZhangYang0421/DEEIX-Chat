@@ -48,6 +48,7 @@ func (m *Module) RegisterRoutes(authRequired *gin.RouterGroup) {
 	authRequired.POST("/files", m.Handler.UploadFile)
 	authRequired.GET("/files", m.Handler.ListFiles)
 	authRequired.GET("/files/:file_id/processing", m.Handler.GetFileProcessingStatus)
+	authRequired.POST("/files/:file_id/processing/retry", m.Handler.RetryFileProcessing)
 	authRequired.POST("/files/:file_id/transcription/retry", m.Handler.RetryAudioTranscription)
 	authRequired.GET("/files/:file_id/transcript", m.Handler.GetFileTranscript)
 	authRequired.PATCH("/files/:file_id/transcript", m.Handler.PatchFileTranscript)

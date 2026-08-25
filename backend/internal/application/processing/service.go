@@ -33,6 +33,8 @@ var (
 	ErrFileProcessingFailed = errors.New("file processing failed")
 	// ErrAudioRetryNotAllowed 表示当前录音状态不允许手动重试。
 	ErrAudioRetryNotAllowed = errors.New("audio transcription retry not allowed")
+	// ErrFileRetryNotAllowed 表示当前非音频文件状态不允许重新处理。
+	ErrFileRetryNotAllowed = errors.New("file processing retry not allowed")
 )
 
 // FileProcessingStatusDTO 文件处理状态响应数据。
@@ -249,6 +251,21 @@ func (s *Service) InitializeUploadedFile(ctx context.Context, fileObj *domaincon
 		return err
 	}
 	return s.enqueueFileProcessing(ctx, fileObj.UserID, fileObj.FileID, 0, "")
+}
+
+// RetryFileProcessing 重新提交失败的非音频文件处理任务。
+func (s *Service) RetryFileProcessing(ctx context.Context, userID uint, fileID string) error {
+	if s == nil || s.repo == nil || userID == 0 || strings.TrimSpace(fileID) == "" {
+		return ErrFileRetryNotAllowed
+	}
+	fileObj, err := s.repo.GetActiveFileObjectByID(ctx, userID, strings.TrimSpace(fileID))
+	if err != nil {
+		return err
+	}
+	if fileObj == nil || strings.EqualFold(strings.TrimSpace(fileObj.FileCategory), "audio") || fileObj.ProcessingStatus != "failed" {
+		return ErrFileRetryNotAllowed
+	}
+	return s.InitializeUploadedFile(ctx, fileObj)
 }
 
 // ProcessFile 执行单个文件处理任务。

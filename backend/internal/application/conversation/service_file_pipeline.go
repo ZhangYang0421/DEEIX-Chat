@@ -122,6 +122,18 @@ func (s *Service) RetryAudioTranscription(ctx context.Context, userID uint, file
 	return err
 }
 
+// RetryFileProcessing 重新提交失败的非音频文件处理。
+func (s *Service) RetryFileProcessing(ctx context.Context, userID uint, fileID string) error {
+	if s == nil || s.processingSvc == nil {
+		return appprocessing.ErrFileRetryNotAllowed
+	}
+	err := s.processingSvc.RetryFileProcessing(ctx, userID, fileID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return ErrFileNotFound
+	}
+	return err
+}
+
 func (s *Service) resolveAttachments(
 	ctx context.Context,
 	userID uint,
