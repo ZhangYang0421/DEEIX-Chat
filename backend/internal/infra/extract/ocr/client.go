@@ -33,6 +33,8 @@ const (
 	managedRapidOCRSource   = "managed"
 	rapidOCRHealthEndpoint  = "/healthz"
 	defaultLLMOCRPrompt     = "You are an OCR engine for document images. Extract all visible text in reading order. Return plain text only. Preserve the original language of the image text. Do not summarize, translate, explain, or add markdown. Preserve line breaks when they help readability."
+	paddleSubmitMaxAttempts = 8
+	paddleSubmitRetryDelay  = 15 * time.Second
 )
 
 // ClientConfig 表示 OCR 服务接入配置。
@@ -288,6 +290,16 @@ func applyAuthHeaders(req *http.Request, authToken string) {
 	req.Header.Set("token", token)
 }
 
+func applyPaddleAuthHeader(req *http.Request, authToken string) {
+	if req == nil {
+		return
+	}
+	token := strings.TrimSpace(authToken)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+}
+
 // ExtractText 对文档或图片做 OCR，返回识别文本。
 func (c *Client) ExtractText(ctx context.Context, req Request) (Response, error) {
 	if strings.TrimSpace(req.AbsolutePath) == "" {
@@ -314,10 +326,6 @@ func (c *Client) extractTextWithPaddle(ctx context.Context, req Request) (Respon
 	if c == nil || strings.TrimSpace(c.baseURL) == "" {
 		return Response{}, fmt.Errorf("ocr_unavailable")
 	}
-	file, err := os.Open(strings.TrimSpace(req.AbsolutePath))
-	if err != nil {
-		return Response{}, err
-	}
 	fileName := strings.TrimSpace(req.FileName)
 	if fileName == "" {
 		fileName = filepath.Base(strings.TrimSpace(req.AbsolutePath))
@@ -329,34 +337,9 @@ func (c *Client) extractTextWithPaddle(ctx context.Context, req Request) (Respon
 		"useChartRecognition":       false,
 	})
 	if err != nil {
-		_ = file.Close()
 		return Response{}, err
 	}
-
-	bodyReader, contentType, writeErrCh := buildPaddleOCRBody(file, fileName, c.model, string(optionalPayload))
-	postReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bodyReader)
-	if err != nil {
-		_ = bodyReader.Close()
-		return Response{}, err
-	}
-	postReq.Header.Set("Content-Type", contentType)
-	postReq.Header.Set("Accept", "application/json")
-	applyAuthHeaders(postReq, c.authToken)
-
-	resp, err := c.httpClient.Do(postReq)
-	if err != nil {
-		_ = bodyReader.Close()
-		if writeErr := awaitMultipartWriteError(writeErrCh); writeErr != nil {
-			return Response{}, writeErr
-		}
-		return Response{}, err
-	}
-	if writeErr := awaitMultipartWriteError(writeErrCh); writeErr != nil {
-		_ = resp.Body.Close()
-		return Response{}, writeErr
-	}
-	jobResponse, err := parsePaddleJobResponse(resp, "submit")
-	_ = resp.Body.Close()
+	jobResponse, err := c.submitPaddleJob(ctx, req.AbsolutePath, fileName, string(optionalPayload))
 	if err != nil {
 		return Response{}, err
 	}
@@ -372,7 +355,7 @@ func (c *Client) extractTextWithPaddle(ctx context.Context, req Request) (Respon
 			return Response{}, requestErr
 		}
 		pollReq.Header.Set("Accept", "application/json")
-		applyAuthHeaders(pollReq, c.authToken)
+		applyPaddleAuthHeader(pollReq, c.authToken)
 		pollResp, requestErr := c.httpClient.Do(pollReq)
 		if requestErr != nil {
 			return Response{}, requestErr
@@ -380,6 +363,12 @@ func (c *Client) extractTextWithPaddle(ctx context.Context, req Request) (Respon
 		job, parseErr := parsePaddleJobResponse(pollResp, "poll")
 		_ = pollResp.Body.Close()
 		if parseErr != nil {
+			if isPaddleRetryableError(parseErr) {
+				if err := waitPaddlePoll(ctx, 5*time.Second); err != nil {
+					return Response{}, err
+				}
+				continue
+			}
 			return Response{}, parseErr
 		}
 		switch strings.ToLower(strings.TrimSpace(job.State)) {
@@ -420,6 +409,54 @@ func (c *Client) extractTextWithPaddle(ctx context.Context, req Request) (Respon
 		return Response{}, fmt.Errorf("ocr_http_%d: %s", resultResp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return parsePaddleJSONL(resultResp.Body, req.PageRanges)
+}
+
+func (c *Client) submitPaddleJob(ctx context.Context, absolutePath string, fileName string, optionalPayload string) (paddleJobResponse, error) {
+	var lastRetryable error
+	for attempt := 1; attempt <= paddleSubmitMaxAttempts; attempt++ {
+		file, err := os.Open(strings.TrimSpace(absolutePath))
+		if err != nil {
+			return paddleJobResponse{}, err
+		}
+		bodyReader, contentType, writeErrCh := buildPaddleOCRBody(file, fileName, c.model, optionalPayload)
+		postReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bodyReader)
+		if err != nil {
+			_ = bodyReader.Close()
+			return paddleJobResponse{}, err
+		}
+		postReq.Header.Set("Content-Type", contentType)
+		postReq.Header.Set("Accept", "application/json")
+		applyPaddleAuthHeader(postReq, c.authToken)
+
+		resp, err := c.httpClient.Do(postReq)
+		if err != nil {
+			_ = bodyReader.Close()
+			if writeErr := awaitMultipartWriteError(writeErrCh); writeErr != nil {
+				return paddleJobResponse{}, writeErr
+			}
+			return paddleJobResponse{}, err
+		}
+		if writeErr := awaitMultipartWriteError(writeErrCh); writeErr != nil {
+			_ = resp.Body.Close()
+			return paddleJobResponse{}, writeErr
+		}
+		jobResponse, parseErr := parsePaddleJobResponse(resp, "submit")
+		_ = resp.Body.Close()
+		if parseErr == nil {
+			return jobResponse, nil
+		}
+		if !isPaddleRetryableError(parseErr) {
+			return paddleJobResponse{}, parseErr
+		}
+		lastRetryable = parseErr
+		if attempt == paddleSubmitMaxAttempts {
+			break
+		}
+		if err = waitPaddlePoll(ctx, paddleSubmitRetryDelay); err != nil {
+			return paddleJobResponse{}, err
+		}
+	}
+	return paddleJobResponse{}, fmt.Errorf("ocr_http_503: PaddleOCR submit temporarily unavailable after %d attempts: %s", paddleSubmitMaxAttempts, strings.TrimSpace(lastRetryable.Error()))
 }
 
 func waitPaddlePoll(ctx context.Context, delay time.Duration) error {
@@ -801,6 +838,8 @@ type paddleJobResponse struct {
 }
 
 type paddleJobEnvelope struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
 	Data struct {
 		JobID        string `json:"jobId"`
 		State        string `json:"state"`
@@ -811,25 +850,72 @@ type paddleJobEnvelope struct {
 	} `json:"data"`
 }
 
+type paddleRetryableError struct {
+	statusCode int
+	code       int
+	message    string
+}
+
+func (e *paddleRetryableError) Error() string {
+	detail := strings.TrimSpace(e.message)
+	if detail == "" {
+		detail = "temporary PaddleOCR service congestion"
+	}
+	if e.code != 0 {
+		return fmt.Sprintf("PaddleOCR code %d: %s", e.code, detail)
+	}
+	return fmt.Sprintf("PaddleOCR HTTP %d: %s", e.statusCode, detail)
+}
+
+func isPaddleRetryableError(err error) bool {
+	var target *paddleRetryableError
+	return errors.As(err, &target)
+}
+
+func paddleRetryableHTTPStatus(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests || statusCode == http.StatusRequestTimeout || statusCode >= http.StatusInternalServerError
+}
+
 func parsePaddleJobResponse(resp *http.Response, operation string) (paddleJobResponse, error) {
 	if resp == nil {
 		return paddleJobResponse{}, fmt.Errorf("ocr_unavailable")
 	}
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
+	if readErr != nil {
+		return paddleJobResponse{}, readErr
+	}
+	var envelope paddleJobEnvelope
+	decodeErr := json.Unmarshal(body, &envelope)
+	detail := strings.TrimSpace(envelope.Msg)
+	if detail == "" {
+		detail = strings.TrimSpace(string(body))
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		detail := strings.TrimSpace(string(body))
 		switch resp.StatusCode {
 		case http.StatusUnauthorized:
 			return paddleJobResponse{}, fmt.Errorf("ocr_unauthorized")
 		case http.StatusForbidden:
 			return paddleJobResponse{}, fmt.Errorf("ocr_forbidden")
 		default:
+			if paddleRetryableHTTPStatus(resp.StatusCode) {
+				return paddleJobResponse{}, &paddleRetryableError{statusCode: resp.StatusCode, code: envelope.Code, message: detail}
+			}
 			return paddleJobResponse{}, fmt.Errorf("ocr_http_%d: PaddleOCR %s request: %s", resp.StatusCode, operation, detail)
 		}
 	}
-	var envelope paddleJobEnvelope
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1*1024*1024)).Decode(&envelope); err != nil {
-		return paddleJobResponse{}, fmt.Errorf("ocr_unprocessable: invalid PaddleOCR %s response: %w", operation, err)
+	if decodeErr != nil {
+		return paddleJobResponse{}, fmt.Errorf("ocr_unprocessable: invalid PaddleOCR %s response: %w", operation, decodeErr)
+	}
+	switch envelope.Code {
+	case 0, http.StatusOK:
+	case http.StatusUnauthorized:
+		return paddleJobResponse{}, fmt.Errorf("ocr_unauthorized")
+	case http.StatusForbidden:
+		return paddleJobResponse{}, fmt.Errorf("ocr_forbidden")
+	case 10010:
+		return paddleJobResponse{}, &paddleRetryableError{statusCode: resp.StatusCode, code: envelope.Code, message: envelope.Msg}
+	default:
+		return paddleJobResponse{}, fmt.Errorf("ocr_unprocessable: PaddleOCR %s failed with code %d: %s", operation, envelope.Code, detail)
 	}
 	return paddleJobResponse{
 		JobID:        strings.TrimSpace(envelope.Data.JobID),

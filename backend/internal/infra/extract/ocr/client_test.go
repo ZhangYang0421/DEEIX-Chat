@@ -75,6 +75,45 @@ func TestParsePaddleJobResponse(t *testing.T) {
 	}
 }
 
+func TestParsePaddleJobResponseQueueFullIsRetryable(t *testing.T) {
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"code":10010,"msg":"任务提交队列已满，请稍后重试"}`)),
+	}
+
+	_, err := parsePaddleJobResponse(response, "submit")
+	if err == nil || !isPaddleRetryableError(err) {
+		t.Fatalf("parsePaddleJobResponse() error = %v, want retryable", err)
+	}
+	if !strings.Contains(err.Error(), "10010") || !strings.Contains(err.Error(), "队列已满") {
+		t.Fatalf("retryable error = %q", err.Error())
+	}
+}
+
+func TestParsePaddleJobResponseServerErrorIsRetryable(t *testing.T) {
+	response := &http.Response{
+		StatusCode: http.StatusServiceUnavailable,
+		Body:       io.NopCloser(strings.NewReader(`{"code":10010,"msg":"busy"}`)),
+	}
+
+	_, err := parsePaddleJobResponse(response, "submit")
+	if err == nil || !isPaddleRetryableError(err) {
+		t.Fatalf("parsePaddleJobResponse() error = %v, want retryable", err)
+	}
+}
+
+func TestParsePaddleJobResponseEnvelopeUnauthorized(t *testing.T) {
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"code":401,"msg":"Unauthorized"}`)),
+	}
+
+	_, err := parsePaddleJobResponse(response, "submit")
+	if err == nil || err.Error() != "ocr_unauthorized" {
+		t.Fatalf("parsePaddleJobResponse() error = %v, want ocr_unauthorized", err)
+	}
+}
+
 func TestParsePaddleJSONL(t *testing.T) {
 	raw := strings.Join([]string{
 		`{"result":{"layoutParsingResults":[{"markdown":{"text":"第一页正文"}}]}}`,

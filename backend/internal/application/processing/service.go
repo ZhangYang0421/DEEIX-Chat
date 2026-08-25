@@ -1048,7 +1048,7 @@ func HumanizeFileProcessingError(fileCategory string, code string, message strin
 	case "ocr_forbidden":
 		return "OCR 服务拒绝访问，请检查服务端鉴权或访问控制配置。"
 	case "ocr_http_error":
-		if strings.HasPrefix(lower, "ocr_http_") {
+		if strings.HasPrefix(lower, "ocr_http_") || strings.Contains(lower, "_ocr_http_") {
 			if idx := strings.Index(raw, ":"); idx >= 0 {
 				codePart := strings.TrimSpace(raw[:idx])
 				msgPart := strings.TrimSpace(raw[idx+1:])
