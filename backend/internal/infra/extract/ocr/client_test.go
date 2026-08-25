@@ -77,7 +77,7 @@ func TestParsePaddleJobResponse(t *testing.T) {
 
 func TestParsePaddleJobResponseQueueFullIsRetryable(t *testing.T) {
 	response := &http.Response{
-		StatusCode: http.StatusOK,
+		StatusCode: http.StatusBadRequest,
 		Body:       io.NopCloser(strings.NewReader(`{"code":10010,"msg":"任务提交队列已满，请稍后重试"}`)),
 	}
 
@@ -87,6 +87,18 @@ func TestParsePaddleJobResponseQueueFullIsRetryable(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "10010") || !strings.Contains(err.Error(), "队列已满") {
 		t.Fatalf("retryable error = %q", err.Error())
+	}
+}
+
+func TestParsePaddleJobResponseBadRequestIsNotRetryable(t *testing.T) {
+	response := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(strings.NewReader(`{"code":10011,"msg":"invalid request"}`)),
+	}
+
+	_, err := parsePaddleJobResponse(response, "submit")
+	if err == nil || isPaddleRetryableError(err) {
+		t.Fatalf("parsePaddleJobResponse() error = %v, want non-retryable", err)
 	}
 }
 

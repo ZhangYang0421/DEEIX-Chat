@@ -890,6 +890,9 @@ func parsePaddleJobResponse(resp *http.Response, operation string) (paddleJobRes
 	if detail == "" {
 		detail = strings.TrimSpace(string(body))
 	}
+	if decodeErr == nil && envelope.Code == 10010 {
+		return paddleJobResponse{}, &paddleRetryableError{statusCode: resp.StatusCode, code: envelope.Code, message: envelope.Msg}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		switch resp.StatusCode {
 		case http.StatusUnauthorized:
@@ -912,8 +915,6 @@ func parsePaddleJobResponse(resp *http.Response, operation string) (paddleJobRes
 		return paddleJobResponse{}, fmt.Errorf("ocr_unauthorized")
 	case http.StatusForbidden:
 		return paddleJobResponse{}, fmt.Errorf("ocr_forbidden")
-	case 10010:
-		return paddleJobResponse{}, &paddleRetryableError{statusCode: resp.StatusCode, code: envelope.Code, message: envelope.Msg}
 	default:
 		return paddleJobResponse{}, fmt.Errorf("ocr_unprocessable: PaddleOCR %s failed with code %d: %s", operation, envelope.Code, detail)
 	}
