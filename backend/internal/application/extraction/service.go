@@ -733,6 +733,7 @@ func resolveOCREngine(snapshot config.Config, mode string) ocrEngine {
 				BaseURL:        strings.TrimSpace(snapshot.ExtractPaddleOCRBaseURL),
 				AuthToken:      snapshot.ExtractPaddleOCRAuthToken,
 				TimeoutSeconds: snapshot.ExtractPaddleOCRTimeoutSeconds,
+				OutboundPolicy: snapshot.TrustedOutboundPolicy(),
 			}),
 		}
 	case OCREngineMistral:

@@ -386,6 +386,24 @@ func TestMistralOCRSettings(t *testing.T) {
 	}
 }
 
+func TestValidateFileProcessingSettingsRequiresPaddleOCRToken(t *testing.T) {
+	baseSettings := []domainsettings.SystemSetting{
+		{Namespace: "extract", Key: "image_ocr_enabled", Value: "false"},
+		{Namespace: "extract", Key: "pdf_ocr_fallback_enabled", Value: "true"},
+		{Namespace: "extract", Key: "ocr_engine", Value: "paddle"},
+		{Namespace: "extract", Key: "paddle_ocr_base_url", Value: "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"},
+		{Namespace: "extract", Key: "paddle_ocr_auth_token", Value: "stored-token"},
+	}
+	repo := &testSettingsRepo{byNamespace: map[string][]domainsettings.SystemSetting{"extract": baseSettings, "file": {}}}
+	service := NewService(repo, "test-data-encryption-key")
+	if err := service.validateFileProcessingSettings(context.Background(), []PatchItem{{Namespace: "extract", Key: "paddle_ocr_auth_token", Value: ""}}); err != nil {
+		t.Fatalf("expected an empty sensitive patch to preserve configured PaddleOCR token, got %v", err)
+	}
+	if err := service.validateFileProcessingSettings(context.Background(), []PatchItem{{Namespace: "extract", Key: "paddle_ocr_auth_token", Value: "", Clear: true}}); err == nil {
+		t.Fatal("expected clearing the configured PaddleOCR token to fail")
+	}
+}
+
 func TestValidateFileProcessingSettingsRequiresMistralOCRConfiguration(t *testing.T) {
 	baseSettings := []domainsettings.SystemSetting{
 		{Namespace: "extract", Key: "image_ocr_enabled", Value: "true"},

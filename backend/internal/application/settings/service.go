@@ -748,6 +748,9 @@ func (s *Service) validateFileProcessingSettings(ctx context.Context, patches []
 		if strings.TrimSpace(next["extract:paddle_ocr_base_url"]) == "" {
 			return fmt.Errorf("extract:paddle_ocr_base_url is required when OCR engine is paddle")
 		}
+		if strings.TrimSpace(next["extract:paddle_ocr_auth_token"]) == "" {
+			return fmt.Errorf("extract:paddle_ocr_auth_token is required when OCR engine is paddle")
+		}
 	case extraction.OCREngineTencent:
 		if strings.TrimSpace(next["extract:tencent_ocr_secret_id"]) == "" {
 			return fmt.Errorf("extract:tencent_ocr_secret_id is required when OCR engine is tencent")

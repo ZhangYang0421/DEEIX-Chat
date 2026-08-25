@@ -118,6 +118,8 @@ flowchart TB
 
 后端内部保持清晰分层：`cmd/internal/cli` 负责启动入口，`internal/app` 负责应用装配，`transport/http` 负责 HTTP 边界，`application` 负责业务用例与事务编排，`domain` 表达领域语义，`infra` 承载数据库、缓存、存储和外部协议实现。数据层按领域前缀组织表结构，财务流水、审计日志、系统事件和高增长向量数据保持独立事实源。
 
+Paddle OCR 可直接接入百度 AI Studio 的 PaddleOCR-VL 异步任务接口：后端上传文件、轮询任务状态并下载 JSONL 识别结果，不需要在应用服务器本地运行 OCR 模型。后台选择 `Paddle OCR` 后配置 AI Studio Token，并开启 PDF OCR 回退即可。
+
 ## 音频转写：MP3 与 M4A
 
 录音作为一类独立文件附件处理。目前支持**单个 MP3 或 M4A 文件**：

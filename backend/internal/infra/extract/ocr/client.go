@@ -26,6 +26,8 @@ const (
 	errOCREmptyContent      = "ocr_empty_content"
 	DefaultTesseractBaseURL = "http://127.0.0.1:8004/ocr"
 	DefaultRapidOCRBaseURL  = "http://127.0.0.1:8002/ocr"
+	DefaultPaddleOCRJobsURL = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
+	DefaultPaddleOCRModel   = "PaddleOCR-VL-1.6"
 	ManagedRapidOCRBaseURL  = "http://deeix-chat-rapidocr:8002/ocr"
 	managedRapidOCRHost     = "deeix-chat-rapidocr"
 	managedRapidOCRSource   = "managed"
@@ -80,7 +82,9 @@ type Client struct {
 	httpClient     *http.Client
 	llmClient      *llm.Client
 	pdfRenderer    *pdfrender.Renderer
+	outboundPolicy security.OutboundPolicy
 	mistral        bool
+	paddle         bool
 }
 
 // NewRapidOCR 创建 RapidOCR client。
@@ -95,7 +99,32 @@ func NewTesseract(cfg ClientConfig) *Client {
 
 // NewPaddle 创建 Paddle OCR client。
 func NewPaddle(cfg ClientConfig) *Client {
-	return newUploadTextClient(cfg)
+	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	if baseURL == "" {
+		baseURL = DefaultPaddleOCRJobsURL
+	}
+	trustedPolicy, err := cfg.OutboundPolicy.WithTrustedHTTPURLs(baseURL)
+	if err != nil {
+		return nil
+	}
+	trustedOrigin, err := security.HTTPOrigin(baseURL)
+	if err != nil {
+		return nil
+	}
+	transport := security.NewOutboundHTTPTransport(trustedPolicy, 10*time.Second)
+	return &Client{
+		baseURL:        baseURL,
+		authToken:      strings.TrimSpace(cfg.AuthToken),
+		model:          firstNonEmpty(strings.TrimSpace(cfg.Model), DefaultPaddleOCRModel),
+		timeoutSeconds: cfg.TimeoutSeconds,
+		httpClient: &http.Client{
+			Timeout:       resolveHTTPTimeout(cfg.TimeoutSeconds, 600*time.Second),
+			Transport:     platformtracing.NewHTTPTransport(transport),
+			CheckRedirect: outboundhttp.NewRedirectPolicy(cfg.OutboundPolicy, trustedOrigin, "PaddleOCR request"),
+		},
+		outboundPolicy: cfg.OutboundPolicy,
+		paddle:         true,
+	}
 }
 
 // NewLLM 创建当前 LLM OCR client。
@@ -273,7 +302,135 @@ func (c *Client) ExtractText(ctx context.Context, req Request) (Response, error)
 	if c.mistral {
 		return c.extractTextWithMistral(ctx, req)
 	}
+	if c.paddle {
+		return c.extractTextWithPaddle(ctx, req)
+	}
 	return c.extractTextRemote(ctx, req)
+}
+
+// extractTextWithPaddle 调用 PaddleOCR-VL 的异步任务接口。
+// 该接口先提交任务，再轮询任务状态，最后下载 JSONL 结果。
+func (c *Client) extractTextWithPaddle(ctx context.Context, req Request) (Response, error) {
+	if c == nil || strings.TrimSpace(c.baseURL) == "" {
+		return Response{}, fmt.Errorf("ocr_unavailable")
+	}
+	file, err := os.Open(strings.TrimSpace(req.AbsolutePath))
+	if err != nil {
+		return Response{}, err
+	}
+	fileName := strings.TrimSpace(req.FileName)
+	if fileName == "" {
+		fileName = filepath.Base(strings.TrimSpace(req.AbsolutePath))
+	}
+
+	optionalPayload, err := json.Marshal(map[string]bool{
+		"useDocOrientationClassify": false,
+		"useDocUnwarping":           false,
+		"useChartRecognition":       false,
+	})
+	if err != nil {
+		_ = file.Close()
+		return Response{}, err
+	}
+
+	bodyReader, contentType, writeErrCh := buildPaddleOCRBody(file, fileName, c.model, string(optionalPayload))
+	postReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bodyReader)
+	if err != nil {
+		_ = bodyReader.Close()
+		return Response{}, err
+	}
+	postReq.Header.Set("Content-Type", contentType)
+	postReq.Header.Set("Accept", "application/json")
+	applyAuthHeaders(postReq, c.authToken)
+
+	resp, err := c.httpClient.Do(postReq)
+	if err != nil {
+		_ = bodyReader.Close()
+		if writeErr := awaitMultipartWriteError(writeErrCh); writeErr != nil {
+			return Response{}, writeErr
+		}
+		return Response{}, err
+	}
+	if writeErr := awaitMultipartWriteError(writeErrCh); writeErr != nil {
+		_ = resp.Body.Close()
+		return Response{}, writeErr
+	}
+	jobResponse, err := parsePaddleJobResponse(resp, "submit")
+	_ = resp.Body.Close()
+	if err != nil {
+		return Response{}, err
+	}
+	if jobResponse.JobID == "" {
+		return Response{}, fmt.Errorf("ocr_unprocessable: PaddleOCR response did not include jobId")
+	}
+
+	jobURL := strings.TrimRight(c.baseURL, "/") + "/" + jobResponse.JobID
+	var resultURL string
+	for {
+		pollReq, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, jobURL, nil)
+		if requestErr != nil {
+			return Response{}, requestErr
+		}
+		pollReq.Header.Set("Accept", "application/json")
+		applyAuthHeaders(pollReq, c.authToken)
+		pollResp, requestErr := c.httpClient.Do(pollReq)
+		if requestErr != nil {
+			return Response{}, requestErr
+		}
+		job, parseErr := parsePaddleJobResponse(pollResp, "poll")
+		_ = pollResp.Body.Close()
+		if parseErr != nil {
+			return Response{}, parseErr
+		}
+		switch strings.ToLower(strings.TrimSpace(job.State)) {
+		case "done", "success", "completed":
+			resultURL = strings.TrimSpace(job.ResultURL)
+		case "failed", "error":
+			message := firstNonEmpty(job.ErrorMessage, "PaddleOCR job failed")
+			return Response{}, fmt.Errorf("ocr_failed: %s", message)
+		case "pending", "running", "queued", "processing", "":
+			if err := waitPaddlePoll(ctx, 5*time.Second); err != nil {
+				return Response{}, err
+			}
+			continue
+		default:
+			return Response{}, fmt.Errorf("ocr_unprocessable: unknown PaddleOCR job state %q", job.State)
+		}
+		if resultURL == "" {
+			return Response{}, fmt.Errorf("ocr_unprocessable: PaddleOCR job completed without resultUrl.jsonUrl")
+		}
+		break
+	}
+
+	resultReq, err := http.NewRequestWithContext(ctx, http.MethodGet, resultURL, nil)
+	if err != nil {
+		return Response{}, err
+	}
+	if err = security.ValidateOutboundHTTPURL(resultURL, c.outboundPolicy); err != nil {
+		return Response{}, fmt.Errorf("ocr_unprocessable: PaddleOCR result URL is not allowed: %w", err)
+	}
+	resultReq.Header.Set("Accept", "application/jsonl, text/plain")
+	resultResp, err := c.httpClient.Do(resultReq)
+	if err != nil {
+		return Response{}, err
+	}
+	defer resultResp.Body.Close()
+	if resultResp.StatusCode < 200 || resultResp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resultResp.Body, 4096))
+		return Response{}, fmt.Errorf("ocr_http_%d: %s", resultResp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return parsePaddleJSONL(resultResp.Body, req.PageRanges)
+}
+
+func waitPaddlePoll(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (c *Client) extractTextWithLLM(ctx context.Context, req Request) (Response, error) {
@@ -593,6 +750,152 @@ func buildMultipartOCRBody(file *os.File, fileName string, mimeType string, page
 	}()
 
 	return bodyReader, writer.FormDataContentType(), errCh
+}
+
+func buildPaddleOCRBody(file *os.File, fileName string, model string, optionalPayload string) (io.ReadCloser, string, <-chan error) {
+	bodyReader, bodyWriter := io.Pipe()
+	writer := multipart.NewWriter(bodyWriter)
+	errCh := make(chan error, 1)
+
+	go func() {
+		defer close(errCh)
+		defer file.Close() //nolint:errcheck
+
+		fail := func(err error) {
+			errCh <- err
+			_ = bodyWriter.CloseWithError(err)
+		}
+
+		part, err := writer.CreateFormFile("file", fileName)
+		if err != nil {
+			fail(err)
+			return
+		}
+		if _, err = io.Copy(part, file); err != nil {
+			fail(err)
+			return
+		}
+		if err = writer.WriteField("model", model); err != nil {
+			fail(err)
+			return
+		}
+		if err = writer.WriteField("optionalPayload", optionalPayload); err != nil {
+			fail(err)
+			return
+		}
+		if err = writer.Close(); err != nil {
+			fail(err)
+			return
+		}
+		_ = bodyWriter.Close()
+	}()
+
+	return bodyReader, writer.FormDataContentType(), errCh
+}
+
+type paddleJobResponse struct {
+	JobID        string `json:"jobId"`
+	State        string `json:"state"`
+	ErrorMessage string `json:"errorMsg"`
+	ResultURL    string `json:"-"`
+}
+
+type paddleJobEnvelope struct {
+	Data struct {
+		JobID        string `json:"jobId"`
+		State        string `json:"state"`
+		ErrorMessage string `json:"errorMsg"`
+		ResultURL    struct {
+			JSONURL string `json:"jsonUrl"`
+		} `json:"resultUrl"`
+	} `json:"data"`
+}
+
+func parsePaddleJobResponse(resp *http.Response, operation string) (paddleJobResponse, error) {
+	if resp == nil {
+		return paddleJobResponse{}, fmt.Errorf("ocr_unavailable")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		detail := strings.TrimSpace(string(body))
+		switch resp.StatusCode {
+		case http.StatusUnauthorized:
+			return paddleJobResponse{}, fmt.Errorf("ocr_unauthorized")
+		case http.StatusForbidden:
+			return paddleJobResponse{}, fmt.Errorf("ocr_forbidden")
+		default:
+			return paddleJobResponse{}, fmt.Errorf("ocr_http_%d: PaddleOCR %s request: %s", resp.StatusCode, operation, detail)
+		}
+	}
+	var envelope paddleJobEnvelope
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1*1024*1024)).Decode(&envelope); err != nil {
+		return paddleJobResponse{}, fmt.Errorf("ocr_unprocessable: invalid PaddleOCR %s response: %w", operation, err)
+	}
+	return paddleJobResponse{
+		JobID:        strings.TrimSpace(envelope.Data.JobID),
+		State:        strings.TrimSpace(envelope.Data.State),
+		ErrorMessage: strings.TrimSpace(envelope.Data.ErrorMessage),
+		ResultURL:    strings.TrimSpace(envelope.Data.ResultURL.JSONURL),
+	}, nil
+}
+
+type paddleJSONLResult struct {
+	Result struct {
+		LayoutParsingResults []struct {
+			Markdown struct {
+				Text string `json:"text"`
+			} `json:"markdown"`
+		} `json:"layoutParsingResults"`
+	} `json:"result"`
+}
+
+func parsePaddleJSONL(body io.Reader, ranges []PageRange) (Response, error) {
+	if body == nil {
+		return Response{}, fmt.Errorf("ocr_unprocessable: empty PaddleOCR result")
+	}
+	targets := resolveOCRPageNumbers(ranges)
+	targetSet := make(map[int]struct{}, len(targets))
+	for _, page := range targets {
+		targetSet[page] = struct{}{}
+	}
+
+	decoder := json.NewDecoder(body)
+	pageNumber := 0
+	pages := make([]PageText, 0)
+	for {
+		var line paddleJSONLResult
+		if err := decoder.Decode(&line); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return Response{}, fmt.Errorf("ocr_unprocessable: invalid PaddleOCR JSONL result: %w", err)
+		}
+		for _, item := range line.Result.LayoutParsingResults {
+			pageNumber++
+			if len(targetSet) > 0 {
+				if _, ok := targetSet[pageNumber]; !ok {
+					continue
+				}
+			}
+			text := normalizeOCRText(item.Markdown.Text)
+			if text == "" {
+				continue
+			}
+			pages = append(pages, PageText{PageNumber: pageNumber, Text: text})
+		}
+	}
+	if len(pages) == 0 {
+		return Response{}, fmt.Errorf(errOCREmptyContent)
+	}
+	parts := make([]string, 0, len(pages))
+	for _, page := range pages {
+		parts = append(parts, page.Text)
+	}
+	return Response{
+		Text:          strings.Join(parts, "\n\n"),
+		RenderedPages: pageNumber,
+		Pages:         pages,
+	}, nil
 }
 
 func awaitMultipartWriteError(errCh <-chan error) error {

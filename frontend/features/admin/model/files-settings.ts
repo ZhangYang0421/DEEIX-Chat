@@ -1,5 +1,5 @@
-import type { SettingsGrouped } from "@/shared/api/settings.types";
 import type { AdminServiceRuntimeView } from "@/features/admin/api/admin.types";
+import type { SettingsGrouped } from "@/shared/api/settings.types";
 
 export type SettingsFieldType = "int" | "bool" | "string" | "password" | "textarea" | "select" | "tabs" | "multi-check" | "button";
 
@@ -498,20 +498,20 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       {
         namespace: "extract",
         key: "paddle_ocr_base_url",
-        label: "Paddle OCR service URL *",
-        description: "Paddle OCR service URL.",
+        label: "PaddleOCR-VL jobs URL *",
+        description: "Baidu AI Studio PaddleOCR-VL asynchronous jobs endpoint.",
         type: "string",
-        placeholder: "Service URL",
+        placeholder: "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs",
         visibleWhen: { all: [OCR_ENABLED_RULE, { field: "extract.ocr_engine", equals: OCR_ENGINES.PADDLE }] },
         subgroupKey: "paddle_ocr",
       },
       {
         namespace: "extract",
         key: "paddle_ocr_auth_token",
-        label: "Paddle OCR auth key",
-        description: "Auth key sent when calling Paddle OCR.",
+        label: "PaddleOCR AI Studio token *",
+        description: "Bearer token used by the Baidu AI Studio PaddleOCR-VL jobs API.",
         type: "password",
-        placeholder: "Auth key (optional)",
+        placeholder: "Token",
         visibleWhen: { all: [OCR_ENABLED_RULE, { field: "extract.ocr_engine", equals: OCR_ENGINES.PADDLE }] },
         subgroupKey: "paddle_ocr",
       },
@@ -519,9 +519,9 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
         namespace: "extract",
         key: "paddle_ocr_timeout_seconds",
         label: "Paddle OCR timeout",
-        description: "Maximum wait time for one Paddle OCR request, in seconds.",
+        description: "Maximum total wait time for asynchronous PaddleOCR-VL processing, in seconds.",
         type: "int",
-        placeholder: "Timeout (seconds)",
+        placeholder: "600",
         visibleWhen: { all: [OCR_ENABLED_RULE, { field: "extract.ocr_engine", equals: OCR_ENGINES.PADDLE }] },
         subgroupKey: "paddle_ocr",
       },
@@ -1216,8 +1216,11 @@ export function applySettingsDefaults(next: Record<string, string>): Record<stri
     }
   }
   if (ocrEngine === OCR_ENGINES.PADDLE) {
+    if (!(result["extract.paddle_ocr_base_url"] ?? "").trim()) {
+      result["extract.paddle_ocr_base_url"] = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs";
+    }
     if (!(result["extract.paddle_ocr_timeout_seconds"] ?? "").trim()) {
-      result["extract.paddle_ocr_timeout_seconds"] = "60";
+      result["extract.paddle_ocr_timeout_seconds"] = "600";
     }
   }
   if (ocrEngine === OCR_ENGINES.TENCENT) {
