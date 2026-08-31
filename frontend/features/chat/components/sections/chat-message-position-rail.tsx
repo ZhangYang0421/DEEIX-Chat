@@ -6,10 +6,12 @@ import { createPortal } from "react-dom";
 
 import {
   useMessageScroller,
+  useMessageScrollerScrollable,
   useMessageScrollerVisibility,
 } from "@/components/ui/message-scroller";
 import type { ChatAreaMessage } from "@/features/chat/types/messages";
 import { cn } from "@/lib/utils";
+import { useScrollFadeFallbackRef } from "@/shared/hooks/use-scroll-fade-fallback-ref";
 
 const QUESTION_PREVIEW_MAX_LENGTH = 240;
 const ANSWER_PREVIEW_MAX_LENGTH = 420;
@@ -87,13 +89,15 @@ function ChatMessagePositionPreview({
   previewRef: React.RefObject<HTMLDivElement | null>;
   top: number | null;
 }) {
+  const scrollFadeRef = useScrollFadeFallbackRef<HTMLDivElement>();
+
   return createPortal(
     <AnimatePresence initial={false}>
       {item && position && top !== null ? (
         <motion.div
           ref={previewRef}
           key="chat-message-position-preview"
-          className="pointer-events-none fixed z-[9999] w-[min(22rem,calc(100vw-5rem))] -translate-y-1/2"
+          className="pointer-events-none fixed z-30 w-[min(22rem,calc(100vw-5rem))] -translate-y-1/2"
           style={{ left: position.left, maxHeight: position.maxHeight, top }}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -101,7 +105,10 @@ function ChatMessagePositionPreview({
           transition={{ duration: 0.15, ease: "easeOut" }}
           data-screenshot-exclude="true"
         >
-          <div className="max-h-full scroll-fade-y scroll-fade-12 overflow-y-auto rounded-lg bg-sidebar-accent px-3 py-2 text-left text-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div
+            ref={scrollFadeRef}
+            className="max-h-full scroll-fade-y scroll-fade-12 overflow-y-auto rounded-lg bg-sidebar-accent px-3 py-2 text-left text-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
             <span
               className="block text-sm font-medium leading-5 text-foreground"
               style={{
@@ -142,7 +149,8 @@ function ChatMessagePositionRailComponent({
   messages: ChatAreaMessage[];
 }) {
   const { scrollToMessage } = useMessageScroller();
-  const { currentAnchorId, visibleMessageIds } = useMessageScrollerVisibility();
+  const { end: canScrollToEnd } = useMessageScrollerScrollable();
+  const { visibleMessageIds } = useMessageScrollerVisibility();
   const [hoveredID, setHoveredID] = React.useState<string | null>(null);
   const [previewPosition, setPreviewPosition] = React.useState<PreviewPosition | null>(null);
   const [previewHeight, setPreviewHeight] = React.useState(PREVIEW_ESTIMATED_HEIGHT_PX);
@@ -203,8 +211,8 @@ function ChatMessagePositionRailComponent({
   const visibleIDs = React.useMemo(() => new Set(visibleMessageIds), [visibleMessageIds]);
   const turnIsActive = React.useCallback(
     (item: TurnPreviewItem) =>
-      item.messageIDs.some((messageID) => messageID === currentAnchorId || visibleIDs.has(messageID)),
-    [currentAnchorId, visibleIDs],
+      item.messageIDs.some((messageID) => visibleIDs.has(messageID)),
+    [visibleIDs],
   );
   const activatePreview = React.useCallback((id: string, target: HTMLElement) => {
     const targetRect = target.getBoundingClientRect();
@@ -226,7 +234,8 @@ function ChatMessagePositionRailComponent({
     setPreviewPosition(null);
   }, []);
 
-  const currentIndex = items.findIndex(turnIsActive);
+  const visibleIndex = items.findIndex(turnIsActive);
+  const currentIndex = !canScrollToEnd && items.length > 0 ? items.length - 1 : visibleIndex;
   const hoveredIndex = hoveredID ? items.findIndex((item) => item.id === hoveredID) : -1;
   const activeIndex = hoveredIndex >= 0 ? hoveredIndex : currentIndex >= 0 ? currentIndex : items.length - 1;
   const railLineDistributionActive = hoveredIndex >= 0;
@@ -305,7 +314,7 @@ function ChatMessagePositionRailComponent({
   const preview =
     typeof document !== "undefined" ? (
       <ChatMessagePositionPreview
-        item={previewItem}
+        item={previewItem ?? null}
         position={previewPosition}
         previewRef={previewRef}
         top={previewTop}

@@ -1,27 +1,29 @@
 "use client";
 
-import * as React from "react";
-import { ChevronLeft, Download, ExternalLink, LoaderCircle, Trash2 } from "lucide-react";
+import { ChevronLeft, DatabaseZap, Download, ExternalLink, LoaderCircle, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-
-import { formatBytes, formatDateTime, resolveFileExtension, resolveFileIcon } from "@/shared/lib/file-display";
-import type { FilePreviewState } from "@/features/files/hooks/use-file-preview";
+import * as React from "react";
+import { AnimatedText } from "@/components/ui/animated-text";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { resolveFileProcessingBadge, resolveFileProcessingToneClass } from "@/shared/lib/file-processing";
-import type { FileObjectDTO } from "@/shared/api/file.types";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import type { FilePreviewState } from "@/features/files/hooks/use-file-preview";
 import { useAppLocale } from "@/i18n/app-i18n-provider";
 import { cn } from "@/lib/utils";
+import type { FileObjectDTO } from "@/shared/api/file.types";
+import { formatBytes, formatDateTime, resolveFileExtension, resolveFileIcon } from "@/shared/lib/file-display";
+import { canManuallyVectorizeFile, isVectorIndexOutdated, resolveFileProcessingBadge, resolveFileProcessingToneClass } from "@/shared/lib/file-processing";
 
 type ContentHeaderProps = {
   file: FileObjectDTO | null;
   preview: FilePreviewState;
   deleting: boolean;
+  vectorizing: boolean;
   onBack?: () => void;
   onOpen: () => void;
   onDownload: () => void;
   onDeleteRequest: (file: FileObjectDTO) => void;
   onToggleRagOptOut: (fileID: string, current: boolean) => Promise<void>;
+  onVectorize: (fileID: string) => Promise<void>;
 };
 
 function resolveRawFileTypeLabel(file: FileObjectDTO): string {
@@ -42,11 +44,13 @@ export function ContentHeader({
   file,
   preview,
   deleting,
+  vectorizing,
   onBack,
   onOpen,
   onDownload,
   onDeleteRequest,
   onToggleRagOptOut,
+  onVectorize,
 }: ContentHeaderProps) {
   const tCommon = useTranslations("common.actions");
   const t = useTranslations("files");
@@ -74,7 +78,10 @@ export function ContentHeader({
   }, (key, values) => tStatus(key, values));
 
   return (
-    <div className="flex h-15 min-w-0 shrink-0 items-center justify-between gap-3 border-b border-border/40 px-3 md:px-5">
+    <div
+      className="flex h-15 min-w-0 shrink-0 items-center justify-between gap-3 border-b border-border/40 px-3 md:px-5"
+      data-animated-text-scroll-trigger
+    >
       <div className="flex min-w-0 flex-1 items-center gap-3">
         {onBack ? (
           <Button
@@ -101,7 +108,12 @@ export function ContentHeader({
         </div>
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-medium text-foreground">{file.fileName}</p>
+          <AnimatedText
+            text={file.fileName}
+            className="text-[13px] font-medium text-foreground"
+            textClassName="text-current"
+            scrollOverflow
+          />
           <div className="flex min-w-0 flex-wrap items-center gap-1.5 pt-0.5">
             <p className="text-[11px] text-muted-foreground">
               {formatDateTime(file.createdAt, locale)}
@@ -142,6 +154,20 @@ export function ContentHeader({
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
+        {canManuallyVectorizeFile(file) ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="size-6"
+            onClick={() => onVectorize(file.fileID)}
+            disabled={vectorizing}
+            aria-label={t(isVectorIndexOutdated(file) ? "actions.updateIndex" : "actions.vectorize")}
+            title={t(isVectorIndexOutdated(file) ? "actions.updateIndex" : "actions.vectorize")}
+          >
+            {vectorizing ? <LoaderCircle className="size-3.5 animate-spin" strokeWidth={1.6} /> : <DatabaseZap className="size-3.5" strokeWidth={1.6} />}
+          </Button>
+        ) : null}
         <Button
           type="button"
           variant="ghost"

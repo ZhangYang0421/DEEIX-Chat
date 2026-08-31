@@ -130,6 +130,27 @@ func (r *coordinatorTestRepo) ListStaleModeratingRuns(context.Context, time.Time
 	return append([]string(nil), r.staleRunIDs...), nil
 }
 
+func TestEphemeralCoordinatorBlockDoesNotMutateConversationRun(t *testing.T) {
+	repo := &coordinatorTestRepo{}
+	service := &Service{repo: repo}
+	coord := newRunCoordinator(service, RunMeta{RunID: "temporary-run", Ephemeral: true}, runtimeConfig{})
+	emitted := false
+	coord.SetLiveEmitter(func(eventType string, _ map[string]interface{}) {
+		emitted = eventType == "moderation_blocked"
+	})
+
+	notified, err := coord.applyBlock(BlockInfo{EventID: "event", Direction: DirectionInput, Categories: []string{"unsafe"}})
+	if err != nil {
+		t.Fatalf("apply ephemeral block: %v", err)
+	}
+	if !notified || !emitted {
+		t.Fatal("ephemeral block must still emit the terminal moderation event")
+	}
+	if repo.applyCalls != 0 {
+		t.Fatalf("ApplyRunBlock calls = %d, want 0", repo.applyCalls)
+	}
+}
+
 func TestKnownHitRemainsBlockedWhenDurableApplyFails(t *testing.T) {
 	repo := &coordinatorTestRepo{applyErr: errors.New("database unavailable")}
 	service := NewService(nil, repo, "", nil)
@@ -319,6 +340,29 @@ func TestInputImageModerationSkipsNonImageAttachments(t *testing.T) {
 	repo.mu.Unlock()
 	if failedOpen || pending != 0 || eventCount != 0 {
 		t.Fatalf("non-image attachment must be ignored: failedOpen=%v pending=%d events=%d", failedOpen, pending, eventCount)
+	}
+}
+
+func TestEphemeralInputImageModerationQueuesRequestScopedBytes(t *testing.T) {
+	service := NewService(nil, &coordinatorTestRepo{}, "", nil)
+	cfg := runtimeConfig{Policy: Policy{InputImageCategories: []string{"violence"}}}
+	coord := newRunCoordinator(service, RunMeta{RunID: "run_ephemeral_image", Ephemeral: true}, cfg)
+
+	coord.EnqueueInputImageSources([]OutputImageSource{
+		{FileID: "temporary_image", Data: []byte("image-bytes"), MimeType: "image/png", SHA256: "sha"},
+		{FileID: "temporary_duplicate", Data: []byte("duplicate"), MimeType: "image/png", SHA256: "sha"},
+	})
+
+	select {
+	case task := <-service.taskQueue:
+		if task == nil || task.Modality != domaincm.ModalityImage || !task.IsolateOnly {
+			t.Fatalf("unexpected request-scoped moderation task: %#v", task)
+		}
+		if len(task.RawImages) != 1 || string(task.RawImages[0].Data) != "image-bytes" {
+			t.Fatalf("request-scoped image bytes were not queued safely: %#v", task.RawImages)
+		}
+	default:
+		t.Fatal("request-scoped image moderation task was not queued")
 	}
 }
 

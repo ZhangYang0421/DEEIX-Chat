@@ -2,12 +2,10 @@ package objectstore
 
 import (
 	"context"
-	"errors"
-	"io"
 	"strings"
-	"time"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
+	portobjectstore "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/objectstore"
 )
 
 const (
@@ -15,31 +13,23 @@ const (
 	BackendS3    = "s3"
 )
 
+// 数据契约定义在 ports/objectstore，此处保留同名引用供实现使用。
 var (
-	ErrInvalidKey    = errors.New("invalid object key")
+	ErrInvalidKey    = portobjectstore.ErrInvalidKey
 	ErrInvalidExpiry = errors.New("invalid presign expiry")
-	ErrNotFound      = errors.New("object not found")
+	ErrNotFound      = portobjectstore.ErrNotFound
 	ErrUnsupported   = errors.New("operation not supported")
 )
 
-type PutOptions struct {
-	SizeBytes   int64
-	ContentType string
-}
+type (
+	PutOptions = portobjectstore.PutOptions
+	ObjectInfo = portobjectstore.ObjectInfo
+)
 
-type ObjectInfo struct {
-	Key         string
-	SizeBytes   int64
-	ContentType string
-	ModTime     time.Time
-}
-
+// Store 在上游端口契约基础上保留音频转写所需的预签名下载能力。
 type Store interface {
-	Put(ctx context.Context, key string, body io.Reader, opts PutOptions) (ObjectInfo, error)
-	Open(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, error)
-	Delete(ctx context.Context, key string) error
+	portobjectstore.Store
 	PresignGet(ctx context.Context, key string, expires time.Duration) (string, error)
-	Materialize(ctx context.Context, key string) (string, func(), error)
 }
 
 func New(ctx context.Context, cfg config.Config) (Store, error) {

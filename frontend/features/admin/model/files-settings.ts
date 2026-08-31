@@ -163,8 +163,6 @@ export const OCR_ENABLED_RULE: VisibilityRule = {
   ],
 };
 
-export const SERVICE_NAMES: ServiceName[] = ["tika", "docling", "mineru", "tesseract", "rapidocr", "embedding"];
-
 export const SERVICE_LABELS: Record<ServiceName, string> = {
   tika: "Tika",
   docling: "Docling",
@@ -1005,20 +1003,6 @@ export function mergeAllowedMIMETypes(raw: string, items: MinerUMIMERequirement[
     seen.add(mime.toLowerCase());
   }
   return merged.join(",");
-}
-
-export function resolveActiveServices(settings: Record<string, string>): Set<ServiceName> {
-  const active = new Set<ServiceName>();
-  const engine = settings["extract.engine"] ?? "";
-  if (engine === EXTRACT_ENGINE_POLICIES.TIKA) active.add("tika");
-  if (engine === EXTRACT_ENGINE_POLICIES.DOCLING) active.add("docling");
-  if (engine === EXTRACT_ENGINE_POLICIES.MINERU) active.add("mineru");
-  const ocrEnabled = matchesVisibilityRule(OCR_ENABLED_RULE, settings);
-  const ocr = ocrEnabled ? resolveOCREngine(settings["extract.ocr_engine"] ?? "") : "";
-  if (ocr === OCR_ENGINES.TESSERACT) active.add("tesseract");
-  if (ocr === OCR_ENGINES.RAPIDOCR) active.add("rapidocr");
-  if (settings["file.embedding_enabled"] === EMBEDDING_MODES.ON) active.add("embedding");
-  return active;
 }
 
 export function isServiceDirty(

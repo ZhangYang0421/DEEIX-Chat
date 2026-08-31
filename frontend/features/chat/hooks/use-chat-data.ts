@@ -1,17 +1,17 @@
 "use client";
 
-import * as React from "react";
 import { useTranslations } from "next-intl";
-
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { cancelMessageGeneration, listMessagesPage, resumeMessageGenerationStream } from "@/shared/api/conversation";
+import * as React from "react";
 import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
 import { upsertLiveUpstreamThinkTrace } from "@/features/chat/model/upstream-think-store";
+import { cancelMessageGeneration, listMessagesPage, resumeMessageGenerationStream } from "@/shared/api/conversation";
 import type { MessageDTO } from "@/shared/api/conversation.types";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 
 const MESSAGE_PAGE_SIZE = 100;
 
 type ChatDataState = {
+  conversationPublicID: string;
   loading: boolean;
   loadingOlder: boolean;
   errorMsg: string;
@@ -31,14 +31,17 @@ export function useChatData(
   {
     activeGenerationRunsRef,
     activeGenerationRunsRevision = 0,
+    onConversationRunFinished,
   }: {
     activeGenerationRunsRef?: React.RefObject<Set<string>>;
     activeGenerationRunsRevision?: number;
+    onConversationRunFinished?: (runID: string) => void;
   } = {},
 ) {
   const t = useTranslations("chat.data");
   const tSubmit = useTranslations("chat.submit");
   const [state, setState] = React.useState<ChatDataState>({
+    conversationPublicID: conversationID ?? "",
     loading: Boolean(conversationID),
     loadingOlder: false,
     errorMsg: "",
@@ -72,6 +75,7 @@ export function useChatData(
     async function load() {
       if (!conversationID) {
         setState({
+          conversationPublicID: "",
           loading: false,
           loadingOlder: false,
           errorMsg: "",
@@ -85,6 +89,7 @@ export function useChatData(
       const isConversationSwitch = previousConversationIDRef.current !== conversationID;
       previousConversationIDRef.current = conversationID;
       setState((prev) => ({
+        conversationPublicID: conversationID,
         loading: isConversationSwitch || prev.messages.length === 0,
         loadingOlder: false,
         errorMsg: "",
@@ -97,6 +102,7 @@ export function useChatData(
         if (!token) {
           if (!cancelled) {
             setState({
+              conversationPublicID: conversationID,
               loading: false,
               loadingOlder: false,
               errorMsg: t("signInRequired"),
@@ -128,6 +134,7 @@ export function useChatData(
               : prev.messages.filter((message) => message.id < firstTailMessageID);
           const messages = [...loadedOlderMessages, ...data.results];
           return {
+            conversationPublicID: conversationID,
             loading: false,
             loadingOlder: false,
             errorMsg: "",
@@ -169,7 +176,14 @@ export function useChatData(
 
   const loadOlderMessages = React.useCallback(async () => {
     const current = stateRef.current;
-    if (!conversationID || current.loading || current.loadingOlder || !current.hasOlder || current.messages.length === 0) {
+    if (
+      !conversationID ||
+      current.conversationPublicID !== conversationID ||
+      current.loading ||
+      current.loadingOlder ||
+      !current.hasOlder ||
+      current.messages.length === 0
+    ) {
       return false;
     }
 
@@ -233,19 +247,6 @@ export function useChatData(
     }
   }, [conversationID]);
 
-  const loadAllOlderMessages = React.useCallback(async ({ maxPages = 50 }: { maxPages?: number } = {}) => {
-    for (let iteration = 0; iteration < maxPages; iteration += 1) {
-      if (!stateRef.current.hasOlder) {
-        return true;
-      }
-      const loaded = await loadOlderMessages();
-      if (!loaded) {
-        return !stateRef.current.hasOlder;
-      }
-    }
-    return !stateRef.current.hasOlder;
-  }, [loadOlderMessages]);
-
   const cancelResumedGeneration = React.useCallback(async () => {
     const active = activeResumeStreamRef.current;
     if (!active) {
@@ -261,12 +262,18 @@ export function useChatData(
       return false;
     }
 
-    const result = await cancelMessageGeneration(token, active.runID).catch(() => null);
+    const result = await cancelMessageGeneration(token, active.runID).catch((): null => null);
+    if (result?.canceled) {
+      onConversationRunFinished?.(active.runID);
+    }
     reload();
     return Boolean(result?.canceled);
-  }, [clearResumeCheckpoint, reload]);
+  }, [clearResumeCheckpoint, onConversationRunFinished, reload]);
 
   const pendingAssistant = React.useMemo(() => {
+    if (!conversationID || state.conversationPublicID !== conversationID) {
+      return null;
+    }
     for (let index = state.messages.length - 1; index >= 0; index -= 1) {
       const message = state.messages[index];
       if (message.role === "assistant" && message.status === "pending") {
@@ -274,7 +281,7 @@ export function useChatData(
       }
     }
     return null;
-  }, [state.messages]);
+  }, [conversationID, state.conversationPublicID, state.messages]);
 
   const pendingRunID = pendingAssistant?.runID?.trim() || "";
   // revision 仅用于重新读取可变 Set；effect 只依赖当前 pending run 的实际活动状态。
@@ -308,7 +315,11 @@ export function useChatData(
     };
     const isResumeInactive = () => closed || controller.signal.aborted;
     const updateResumeState = (update: (current: ChatDataState) => ChatDataState) => {
-      setState((current) => isResumeInactive() ? current : update(current));
+      setState((current) =>
+        isResumeInactive() || current.conversationPublicID !== conversationID
+          ? current
+          : update(current),
+      );
     };
     resumedTextByRun[pendingRunID] = baseContent;
     activeResumeStreamRef.current = {
@@ -331,6 +342,9 @@ export function useChatData(
         await resumeMessageGenerationStream(token, pendingRunID, {
           signal: controller.signal,
           afterSeq,
+          onTerminal: () => {
+            onConversationRunFinished?.(pendingRunID);
+          },
           onEventSeq: (seq) => {
             if (isResumeInactive()) {
               return;
@@ -416,7 +430,7 @@ export function useChatData(
               ...prev,
               messages: prev.messages.map((message) =>
                 message.runID === pendingRunID && message.role === "assistant" && message.status === "pending"
-                  ? { ...message, processTrace: event.trace }
+                  ? { ...message, processTrace: event.trace ?? message.processTrace }
                   : message,
               ),
             }));
@@ -522,6 +536,7 @@ export function useChatData(
     conversationID,
     pendingRunID,
     pendingRunIsActive,
+    onConversationRunFinished,
     reload,
     tSubmit,
   ]);
@@ -547,7 +562,6 @@ export function useChatData(
     ...state,
     cancelResumedGeneration,
     loadOlderMessages,
-    loadAllOlderMessages,
     reload,
     replaceMessage,
     resumingActivityLabel,

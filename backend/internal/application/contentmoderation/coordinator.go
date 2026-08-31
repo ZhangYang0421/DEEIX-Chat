@@ -20,6 +20,9 @@ type RunMeta struct {
 	MessagePublicID    string
 	AssistantMessageID uint
 	UserMessageID      uint
+	// Ephemeral 表示该运行没有 conversation/message/run 持久化记录。
+	// 审核事件仍按安全保留策略记录，但协调器不得写会话域状态。
+	Ephemeral bool
 }
 
 // BlockInfo is returned when a round is blocked.
@@ -151,12 +154,57 @@ func (c *RunCoordinator) EnqueueInputImages(ctx context.Context, fileIDs []strin
 	if len(raw) == 0 {
 		return
 	}
+	c.enqueueInputImageSources(raw, keptFiles, selected)
+}
+
+// EnqueueInputImageSources queues request-scoped image bytes without requiring
+// persisted file records. Ephemeral chat uses this path so its images follow the
+// same moderation policy while remaining outside the user file library.
+func (c *RunCoordinator) EnqueueInputImageSources(images []OutputImageSource) {
+	if c == nil {
+		return
+	}
+	selected := c.cfg.Policy.CategoriesFor(domaincm.DirectionInput, domaincm.ModalityImage)
+	if len(selected) == 0 || len(images) == 0 {
+		return
+	}
+	seenSHA := make(map[string]struct{})
+	raw := make([]OutputImageSource, 0, len(images))
+	fileIDs := make([]string, 0, len(images))
+	for _, image := range images {
+		if len(image.Data) == 0 {
+			c.recordSurfaceFailure(domaincm.DirectionInput, domaincm.ModalityImage, image.FileID, ErrModerationInvalidResp)
+			continue
+		}
+		sha := strings.TrimSpace(image.SHA256)
+		if sha != "" {
+			if _, exists := seenSHA[sha]; exists {
+				continue
+			}
+			seenSHA[sha] = struct{}{}
+		}
+		fileID := strings.TrimSpace(image.FileID)
+		raw = append(raw, OutputImageSource{
+			FileID:   fileID,
+			Data:     append([]byte(nil), image.Data...),
+			MimeType: strings.TrimSpace(image.MimeType),
+			SHA256:   sha,
+		})
+		fileIDs = append(fileIDs, fileID)
+	}
+	if len(raw) == 0 {
+		return
+	}
+	c.enqueueInputImageSources(raw, fileIDs, selected)
+}
+
+func (c *RunCoordinator) enqueueInputImageSources(raw []OutputImageSource, fileIDs []string, selected []string) {
 	c.startTask(&moderationTask{
 		Coord:     c,
 		Direction: domaincm.DirectionInput,
 		Modality:  domaincm.ModalityImage,
 		RawImages: raw,
-		FileIDs:   keptFiles,
+		FileIDs:   fileIDs,
 		Selected:  selected,
 		Location:  domaincm.ContentLocation{Field: "user_attachments"},
 		// Input hits must isolate but not revoke user library files.
@@ -169,8 +217,10 @@ func (c *RunCoordinator) AfterGeneration(ctx context.Context, outputText string,
 	if c == nil {
 		return BarrierResult{State: domaincm.ModerationStatePassed}
 	}
-	if err := c.service.repo.UpdateRunModeration(ctx, c.meta.RunID, domaincm.ModerationStateModerating, "", "[]"); err != nil {
-		c.service.logWarn("content_moderation_mark_moderating_failed", zap.String("run_id", c.meta.RunID), zap.Error(err))
+	if !c.meta.Ephemeral {
+		if err := c.service.repo.UpdateRunModeration(ctx, c.meta.RunID, domaincm.ModerationStateModerating, "", "[]"); err != nil {
+			c.service.logWarn("content_moderation_mark_moderating_failed", zap.String("run_id", c.meta.RunID), zap.Error(err))
+		}
 	}
 	c.emit("moderation_checking", map[string]interface{}{
 		"type": "moderation_checking",
@@ -246,7 +296,7 @@ func (c *RunCoordinator) settle() (bool, BlockInfo, bool) {
 }
 
 func (c *RunCoordinator) updateRunState(state, eventID, categoriesJSON string) {
-	if c == nil || c.service == nil || c.service.repo == nil {
+	if c == nil || c.meta.Ephemeral || c.service == nil || c.service.repo == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -472,6 +522,9 @@ func (c *RunCoordinator) waitAll(ctx context.Context) {
 
 // applyBlock persists withdrawal then emits the terminal stream event.
 func (c *RunCoordinator) applyBlock(info BlockInfo) (bool, error) {
+	if c.meta.Ephemeral {
+		return c.notifyBlocked(info), nil
+	}
 	// Client disconnect cancels the request context; persistence must survive that.
 	persistCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

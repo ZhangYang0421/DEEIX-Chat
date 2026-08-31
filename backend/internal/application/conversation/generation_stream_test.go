@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	cachememory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/cache/memory"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
 
@@ -22,7 +23,7 @@ func TestGenerationStreamRegistryReplayAndTerminal(t *testing.T) {
 	})
 	ctx := context.Background()
 	runID := EnsureMessageGenerationRunID("")
-	registry.register(ctx, runID, 7, func() {})
+	registry.register(ctx, runID, 7, "conv_test", func() {})
 	defer registry.finish(ctx, runID)
 
 	first := registry.publish(ctx, runID, map[string]interface{}{"type": "delta", "delta": "a"})
@@ -65,7 +66,7 @@ func TestGenerationStreamRegistryReplayUsesFullTextSnapshotBeyondWindow(t *testi
 	})
 	ctx := context.Background()
 	runID := EnsureMessageGenerationRunID("")
-	registry.register(ctx, runID, 7, func() {})
+	registry.register(ctx, runID, 7, "conv_test", func() {})
 	defer registry.finish(ctx, runID)
 
 	for _, delta := range []string{"a", "b", "c", "d", "e", "f"} {
@@ -91,7 +92,7 @@ func TestGenerationStreamRegistryLegacyReplayKeepsOriginalDeltaProtocol(t *testi
 	})
 	ctx := context.Background()
 	runID := EnsureMessageGenerationRunID("")
-	registry.register(ctx, runID, 7, func() {})
+	registry.register(ctx, runID, 7, "conv_test", func() {})
 	defer registry.finish(ctx, runID)
 	registry.publish(ctx, runID, map[string]interface{}{"type": "delta", "delta": "legacy"})
 
@@ -117,7 +118,7 @@ func TestGenerationStreamRegistrySnapshotThenLiveDeltaExactlyOnce(t *testing.T) 
 	})
 	ctx := context.Background()
 	runID := EnsureMessageGenerationRunID("")
-	registry.register(ctx, runID, 7, func() {})
+	registry.register(ctx, runID, 7, "conv_test", func() {})
 	defer registry.finish(ctx, runID)
 	registry.publish(ctx, runID, map[string]interface{}{"type": "delta", "delta": "a"})
 	registry.publish(ctx, runID, map[string]interface{}{"type": "delta", "delta": "b"})
@@ -151,7 +152,7 @@ func TestGenerationStreamRegistryKeepsNonTextReplayInSequenceOrder(t *testing.T)
 	})
 	ctx := context.Background()
 	runID := EnsureMessageGenerationRunID("")
-	registry.register(ctx, runID, 7, func() {})
+	registry.register(ctx, runID, 7, "conv_test", func() {})
 	defer registry.finish(ctx, runID)
 	registry.publish(ctx, runID, map[string]interface{}{"type": "file_proc", "message": "preparing"})
 	registry.publish(ctx, runID, map[string]interface{}{"type": "delta", "delta": "answer"})
@@ -170,6 +171,139 @@ func TestGenerationStreamRegistryKeepsNonTextReplayInSequenceOrder(t *testing.T)
 	}
 }
 
+func TestGenerationStreamRegistryOrdersTextAndUpstreamThinkingSnapshots(t *testing.T) {
+	registry := newGenerationStreamRegistry(newTestGenerationStreamStore(), generationStreamOptions{
+		Retention:        time.Minute,
+		ActiveTTL:        time.Minute,
+		MaxEvents:        8,
+		SubscriberBuffer: 4,
+	})
+	ctx := context.Background()
+	runID := EnsureMessageGenerationRunID("")
+	registry.register(ctx, runID, 7, "conv_test", func() {})
+	defer registry.finish(ctx, runID)
+	registry.publish(ctx, runID, map[string]interface{}{"type": "file_proc", "message": "preparing"})
+	registry.publish(ctx, runID, map[string]interface{}{
+		"type":    "upstream_think_delta",
+		"status":  "streaming",
+		"roundID": " round_1 ",
+		"delta":   "thought",
+	})
+	registry.publish(ctx, runID, map[string]interface{}{"type": "delta", "delta": "answer"})
+	registry.publish(ctx, runID, map[string]interface{}{"type": "usage", "output_tokens": 1})
+
+	replay, _, unsubscribe, ok := registry.subscribe(ctx, 7, runID, 0, true)
+	if !ok {
+		t.Fatal("expected subscription")
+	}
+	defer unsubscribe()
+	if len(replay) != 4 ||
+		replay[0].Seq != 1 || replay[0].Payload["type"] != "file_proc" ||
+		replay[1].Seq != 2 || replay[1].Payload["type"] != "upstream_think_delta" ||
+		replay[1].Payload["contentMarkdown"] != "thought" || replay[1].Payload["roundID"] != "round_1" ||
+		replay[2].Seq != 3 || replay[2].Payload["type"] != "delta" || replay[2].Payload["replace"] != true ||
+		replay[3].Seq != 4 || replay[3].Payload["type"] != "usage" {
+		t.Fatalf("unexpected ordered snapshot replay: %+v", replay)
+	}
+}
+
+func TestGenerationStreamRegistryUpstreamThinkingSnapshotTracksTerminalMetadata(t *testing.T) {
+	registry := newGenerationStreamRegistry(newTestGenerationStreamStore(), generationStreamOptions{
+		Retention:        time.Minute,
+		ActiveTTL:        time.Minute,
+		MaxEvents:        8,
+		SubscriberBuffer: 4,
+	})
+	ctx := context.Background()
+	runID := EnsureMessageGenerationRunID("")
+	registry.register(ctx, runID, 7, "conv_test", func() {})
+	defer registry.finish(ctx, runID)
+	registry.publish(ctx, runID, map[string]interface{}{
+		"type":    "upstream_think_delta",
+		"status":  "streaming",
+		"roundID": "round_1",
+		"delta":   "thought",
+	})
+	registry.publish(ctx, runID, map[string]interface{}{
+		"type":    "upstream_think_delta",
+		"status":  "completed",
+		"roundID": "round_1",
+	})
+
+	replay, _, unsubscribe, ok := registry.subscribe(ctx, 7, runID, 0, true)
+	if !ok {
+		t.Fatal("expected subscription")
+	}
+	defer unsubscribe()
+	if len(replay) != 1 || replay[0].Seq != 2 ||
+		replay[0].Payload["type"] != "upstream_think_delta" ||
+		replay[0].Payload["contentMarkdown"] != "thought" ||
+		replay[0].Payload["status"] != "completed" {
+		t.Fatalf("unexpected terminal upstream-thinking snapshot: %+v", replay)
+	}
+}
+
+func TestGenerationStreamRegistryRestoresCompleteUpstreamThinkingBeyondReplayWindow(t *testing.T) {
+	store := newTestGenerationStreamStore()
+	registry := newGenerationStreamRegistry(store, generationStreamOptions{
+		Retention:        time.Minute,
+		ActiveTTL:        time.Minute,
+		MaxEvents:        generationStreamMaxEvents,
+		SubscriberBuffer: 4,
+	})
+	ctx := context.Background()
+	runID := EnsureMessageGenerationRunID("")
+	registry.register(ctx, runID, 7, "conv_test", func() {})
+	defer registry.finish(ctx, runID)
+
+	var expected strings.Builder
+	for i := 0; i < generationStreamMaxEvents+100; i++ {
+		delta := fmt.Sprintf("thought-%04d\n", i)
+		expected.WriteString(delta)
+		registry.publish(ctx, runID, map[string]interface{}{
+			"type":      "upstream_think_delta",
+			"status":    "streaming",
+			"stage":     "think",
+			"roundID":   "round_1",
+			"eventID":   "event_1",
+			"startedAt": "2026-08-31T00:00:00Z",
+			"delta":     delta,
+		})
+	}
+
+	replay, events, unsubscribe, ok := registry.subscribe(ctx, 7, runID, 0, true)
+	if !ok {
+		t.Fatal("expected subscription")
+	}
+	defer unsubscribe()
+	if len(replay) != 1 {
+		t.Fatalf("expected one upstream-thinking checkpoint, got %d events", len(replay))
+	}
+	checkpoint := replay[0]
+	if checkpoint.Payload["type"] != "upstream_think_delta" ||
+		checkpoint.Payload["contentMarkdown"] != expected.String() ||
+		checkpoint.Payload["roundID"] != "round_1" ||
+		checkpoint.Seq != generationStreamMaxEvents+100 {
+		t.Fatalf("unexpected upstream-thinking checkpoint: %+v", checkpoint)
+	}
+
+	registry.publish(ctx, runID, map[string]interface{}{
+		"type":    "upstream_think_delta",
+		"status":  "streaming",
+		"roundID": "round_1",
+		"eventID": "event_1",
+		"delta":   "continued",
+	})
+	select {
+	case event := <-events:
+		if event.Payload["type"] != "upstream_think_delta" || event.Payload["delta"] != "continued" {
+			t.Fatalf("unexpected live upstream-thinking event: %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for live upstream-thinking event")
+	}
+}
+
 func TestGenerationStreamRegistryRejectsTextReplayWithoutSnapshot(t *testing.T) {
 	store := newTestGenerationStreamStore()
 	registry := newGenerationStreamRegistry(store, generationStreamOptions{
@@ -180,7 +314,7 @@ func TestGenerationStreamRegistryRejectsTextReplayWithoutSnapshot(t *testing.T) 
 	})
 	ctx := context.Background()
 	runID := EnsureMessageGenerationRunID("")
-	registry.register(ctx, runID, 7, func() {})
+	registry.register(ctx, runID, 7, "conv_test", func() {})
 	defer registry.finish(ctx, runID)
 	if _, err := store.AppendGenerationStreamEvent(ctx, runID, repository.GenerationStreamAppend{
 		PayloadJSON: `{"type":"delta","delta":"unsafe"}`,
@@ -203,7 +337,7 @@ func TestGenerationStreamRegistryResetClearsTextSnapshot(t *testing.T) {
 	})
 	ctx := context.Background()
 	runID := EnsureMessageGenerationRunID("")
-	registry.register(ctx, runID, 7, func() {})
+	registry.register(ctx, runID, 7, "conv_test", func() {})
 	defer registry.finish(ctx, runID)
 	registry.publish(ctx, runID, map[string]interface{}{"type": "delta", "delta": "blocked text"})
 	registry.resetEvents(ctx, runID)
@@ -232,7 +366,7 @@ func TestGenerationStreamRegistryCancelUsesSharedMarker(t *testing.T) {
 	ctx := context.Background()
 	runID := EnsureMessageGenerationRunID("")
 	canceled := false
-	registry.register(ctx, runID, 9, func() { canceled = true })
+	registry.register(ctx, runID, 9, "conv_test", func() { canceled = true })
 	defer registry.finish(ctx, runID)
 
 	if !registry.cancel(ctx, 9, runID) {
@@ -269,10 +403,17 @@ func TestGenerationStreamRegistryActiveLeaseLifecycle(t *testing.T) {
 	})
 	ctx := context.Background()
 	runID := EnsureMessageGenerationRunID("")
-	registry.register(ctx, runID, 7, func() {})
+	registry.register(ctx, runID, 7, "conv_test", func() {})
 
 	if !registry.hasActive(ctx, runID) {
 		t.Fatal("expected active lease after register")
+	}
+	items, err := registry.listActive(ctx, 7)
+	if err != nil || len(items) != 1 || items[0].RunID != runID || items[0].ConversationPublicID != "conv_test" {
+		t.Fatalf("active generation snapshot=%+v err=%v, want registered run", items, err)
+	}
+	if otherItems, otherErr := registry.listActive(ctx, 8); otherErr != nil || len(otherItems) != 0 {
+		t.Fatalf("other user snapshot=%+v err=%v, want empty", otherItems, otherErr)
 	}
 
 	registry.finish(ctx, runID)
@@ -285,13 +426,104 @@ func TestGenerationStreamRegistryActiveLeaseLifecycle(t *testing.T) {
 	if stillTracked {
 		t.Fatal("expected local active generation to be removed after finish")
 	}
+	if items, err = registry.listActive(ctx, 7); err != nil || len(items) != 0 {
+		t.Fatalf("active generation snapshot after finish=%+v err=%v, want empty", items, err)
+	}
+}
+
+func TestGenerationStreamRegistryActiveSubscriptionStartsWithSnapshotAndStreamsEvents(t *testing.T) {
+	store := cachememory.New()
+	registry := newGenerationStreamRegistry(store, generationStreamOptions{
+		Retention:        time.Minute,
+		ActiveTTL:        time.Minute,
+		LeaseTTL:         time.Second,
+		LeaseRefresh:     100 * time.Millisecond,
+		MaxEvents:        8,
+		SubscriberBuffer: 4,
+	})
+	ctx := context.Background()
+	registry.register(ctx, "run_snapshot", 7, "conv_snapshot", func() {})
+	defer registry.finish(ctx, "run_snapshot")
+
+	snapshot, events, cancel, err := registry.subscribeActive(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	if len(snapshot) != 1 || snapshot[0].RunID != "run_snapshot" || snapshot[0].ConversationPublicID != "conv_snapshot" {
+		t.Fatalf("snapshot = %+v, want the active run", snapshot)
+	}
+	otherSnapshot, otherEvents, cancelOther, err := registry.subscribeActive(ctx, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancelOther()
+	if len(otherSnapshot) != 0 {
+		t.Fatalf("other user snapshot = %+v, want empty", otherSnapshot)
+	}
+
+	registry.register(ctx, "run_live", 7, "conv_live", func() {})
+	select {
+	case event := <-events:
+		if event.Type != "started" || event.RunID != "run_live" || event.ConversationPublicID != "conv_live" {
+			t.Fatalf("started event = %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for started event")
+	}
+	select {
+	case event := <-otherEvents:
+		t.Fatalf("other user received event = %+v", event)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	registry.finish(ctx, "run_live")
+	select {
+	case event := <-events:
+		if event.Type != "finished" || event.RunID != "run_live" {
+			t.Fatalf("finished event = %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for finished event")
+	}
+}
+
+func TestServiceListActiveMessageGenerationsDelegatesToRegistry(t *testing.T) {
+	registry := newGenerationStreamRegistry(newTestGenerationStreamStore(), generationStreamOptions{
+		Retention:        time.Minute,
+		ActiveTTL:        time.Minute,
+		LeaseTTL:         time.Second,
+		LeaseRefresh:     100 * time.Millisecond,
+		MaxEvents:        8,
+		SubscriberBuffer: 4,
+	})
+	ctx := context.Background()
+	registry.register(ctx, "run_reconcile", 7, "conv_reconcile", func() {})
+	defer registry.finish(ctx, "run_reconcile")
+
+	svc := &Service{generationStreams: registry}
+	items, err := svc.ListActiveMessageGenerations(ctx, 7)
+	if err != nil || len(items) != 1 || items[0].RunID != "run_reconcile" || items[0].ConversationPublicID != "conv_reconcile" {
+		t.Fatalf("active snapshot = %+v err = %v, want registered run", items, err)
+	}
+	if items, err = svc.ListActiveMessageGenerations(ctx, 0); err != nil || len(items) != 0 {
+		t.Fatalf("zero user snapshot = %+v err = %v, want empty", items, err)
+	}
+
+	var nilService *Service
+	if items, err = nilService.ListActiveMessageGenerations(ctx, 7); err != nil || len(items) != 0 {
+		t.Fatalf("nil service snapshot = %+v err = %v, want empty", items, err)
+	}
 }
 
 func TestGenerationStreamStoreActiveLeaseExpires(t *testing.T) {
 	store := newTestGenerationStreamStore()
 	ctx := context.Background()
 	runID := EnsureMessageGenerationRunID("")
-	if err := store.TouchGenerationStreamActive(ctx, runID, 10*time.Millisecond); err != nil {
+	if err := store.RegisterGenerationStream(ctx, runID, 7, "conv_test", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.TouchGenerationStreamActive(ctx, runID, 7, 10*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	if active, err := store.IsGenerationStreamActive(ctx, runID); err != nil || !active {
@@ -307,7 +539,7 @@ func TestGenerationStreamStoreReturnsLatestWindow(t *testing.T) {
 	store := newTestGenerationStreamStore()
 	ctx := context.Background()
 	runID := EnsureMessageGenerationRunID("")
-	if err := store.RegisterGenerationStream(ctx, runID, 11, time.Minute); err != nil {
+	if err := store.RegisterGenerationStream(ctx, runID, 11, "conv_test", time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 5; i++ {
@@ -338,7 +570,7 @@ func TestGenerationStreamSanitizesOversizedTracePayload(t *testing.T) {
 	})
 	ctx := context.Background()
 	runID := EnsureMessageGenerationRunID("")
-	registry.register(ctx, runID, 7, func() {})
+	registry.register(ctx, runID, 7, "conv_test", func() {})
 	defer registry.finish(ctx, runID)
 
 	largeOutput := strings.Repeat("x", generationStreamMaxPayloadBytes)
@@ -424,7 +656,7 @@ func TestGenerationStreamDoesNotCompactOversizedCompletedPayload(t *testing.T) {
 	})
 	ctx := context.Background()
 	runID := EnsureMessageGenerationRunID("")
-	registry.register(ctx, runID, 7, func() {})
+	registry.register(ctx, runID, 7, "conv_test", func() {})
 	defer registry.finish(ctx, runID)
 
 	largeContent := strings.Repeat("a", generationStreamMaxPayloadBytes)
@@ -463,25 +695,31 @@ type testGenerationStreamStore struct {
 }
 
 type testGenerationStream struct {
-	userID      uint
-	canceled    bool
-	activeUntil time.Time
-	nextSeq     int64
-	events      []repository.GenerationStreamMessage
-	textContent strings.Builder
-	textSeq     int64
-	expiresAt   time.Time
+	userID                uint
+	conversationID        string
+	canceled              bool
+	activeUntil           time.Time
+	nextSeq               int64
+	events                []repository.GenerationStreamMessage
+	textContent           strings.Builder
+	textSeq               int64
+	upstreamThinkContent  strings.Builder
+	upstreamThinkSeq      int64
+	upstreamThinkRoundID  string
+	upstreamThinkMetadata string
+	expiresAt             time.Time
 }
 
 func newTestGenerationStreamStore() *testGenerationStreamStore {
 	return &testGenerationStreamStore{items: map[string]*testGenerationStream{}}
 }
 
-func (s *testGenerationStreamStore) RegisterGenerationStream(_ context.Context, runID string, userID uint, ttl time.Duration) error {
+func (s *testGenerationStreamStore) RegisterGenerationStream(_ context.Context, runID string, userID uint, conversationPublicID string, ttl time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	item := s.ensureLocked(runID)
 	item.userID = userID
+	item.conversationID = conversationPublicID
 	item.canceled = false
 	item.expiresAt = time.Now().Add(ttl)
 	return nil
@@ -498,17 +736,20 @@ func (s *testGenerationStreamStore) GetGenerationStreamOwner(_ context.Context, 
 	return item.userID, true, nil
 }
 
-func (s *testGenerationStreamStore) TouchGenerationStreamActive(_ context.Context, runID string, ttl time.Duration) error {
+func (s *testGenerationStreamStore) TouchGenerationStreamActive(_ context.Context, runID string, userID uint, ttl time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ensureLocked(runID).activeUntil = time.Now().Add(ttl)
+	item := s.ensureLocked(runID)
+	if item.userID == userID {
+		item.activeUntil = time.Now().Add(ttl)
+	}
 	return nil
 }
 
-func (s *testGenerationStreamStore) ClearGenerationStreamActive(_ context.Context, runID string) error {
+func (s *testGenerationStreamStore) ClearGenerationStreamActive(_ context.Context, runID string, userID uint) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if item, ok := s.items[runID]; ok {
+	if item, ok := s.items[runID]; ok && item.userID == userID {
 		item.activeUntil = time.Time{}
 	}
 	return nil
@@ -520,6 +761,20 @@ func (s *testGenerationStreamStore) IsGenerationStreamActive(_ context.Context, 
 	s.cleanupLocked()
 	item, ok := s.items[runID]
 	return ok && !item.activeUntil.IsZero() && time.Now().Before(item.activeUntil), nil
+}
+
+func (s *testGenerationStreamStore) ListActiveGenerationStreams(_ context.Context, userID uint) ([]repository.ActiveGenerationStream, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanupLocked()
+	items := make([]repository.ActiveGenerationStream, 0)
+	for runID, item := range s.items {
+		if item.userID != userID || item.activeUntil.IsZero() || !time.Now().Before(item.activeUntil) || item.conversationID == "" {
+			continue
+		}
+		items = append(items, repository.ActiveGenerationStream{RunID: runID, ConversationPublicID: item.conversationID})
+	}
+	return items, nil
 }
 
 func (s *testGenerationStreamStore) RequestGenerationStreamCancel(_ context.Context, runID string, ttl time.Duration) error {
@@ -554,11 +809,45 @@ func (s *testGenerationStreamStore) AppendGenerationStreamEvent(_ context.Contex
 		_, _ = item.textContent.WriteString(input.TextDelta)
 		item.textSeq = item.nextSeq
 	}
+	if input.UpstreamThink != nil {
+		roundID := strings.TrimSpace(input.UpstreamThink.RoundID)
+		if roundID == "" {
+			roundID = item.upstreamThinkRoundID
+		}
+		if roundID != "" && item.upstreamThinkRoundID != "" && roundID != item.upstreamThinkRoundID {
+			item.upstreamThinkContent.Reset()
+		}
+		if input.UpstreamThink.Replace {
+			item.upstreamThinkContent.Reset()
+			_, _ = item.upstreamThinkContent.WriteString(input.UpstreamThink.ContentMarkdown)
+		} else {
+			_, _ = item.upstreamThinkContent.WriteString(input.UpstreamThink.Delta)
+		}
+		item.upstreamThinkSeq = item.nextSeq
+		item.upstreamThinkRoundID = roundID
+		item.upstreamThinkMetadata = input.UpstreamThink.MetadataJSON
+	}
 	if maxEvents > 0 && int64(len(item.events)) > maxEvents {
 		item.events = append([]repository.GenerationStreamMessage(nil), item.events[len(item.events)-int(maxEvents):]...)
 	}
 	item.expiresAt = time.Now().Add(ttl)
 	return record, nil
+}
+
+func (s *testGenerationStreamStore) GetGenerationStreamUpstreamThinkSnapshot(_ context.Context, runID string) (repository.GenerationStreamUpstreamThinkSnapshot, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanupLocked()
+	item, ok := s.items[runID]
+	if !ok || item.upstreamThinkSeq <= 0 {
+		return repository.GenerationStreamUpstreamThinkSnapshot{}, false, nil
+	}
+	return repository.GenerationStreamUpstreamThinkSnapshot{
+		Seq:             item.upstreamThinkSeq,
+		RoundID:         item.upstreamThinkRoundID,
+		ContentMarkdown: item.upstreamThinkContent.String(),
+		MetadataJSON:    item.upstreamThinkMetadata,
+	}, true, nil
 }
 
 func (s *testGenerationStreamStore) GetGenerationStreamTextSnapshot(_ context.Context, runID string) (repository.GenerationStreamTextSnapshot, bool, error) {
@@ -612,6 +901,10 @@ func (s *testGenerationStreamStore) ResetGenerationStreamEvents(_ context.Contex
 		item.events = nil
 		item.textContent.Reset()
 		item.textSeq = 0
+		item.upstreamThinkContent.Reset()
+		item.upstreamThinkSeq = 0
+		item.upstreamThinkRoundID = ""
+		item.upstreamThinkMetadata = ""
 	}
 	return nil
 }

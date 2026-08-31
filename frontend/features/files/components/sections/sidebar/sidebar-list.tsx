@@ -1,14 +1,11 @@
 "use client";
 
-import * as React from "react";
-import { Ellipsis, PencilLine, SquareCheckBig, Trash2, Zap } from "lucide-react";
+import { DatabaseZap, Ellipsis, PencilLine, SquareCheckBig, Trash2, Zap } from "lucide-react";
 import { useTranslations } from "next-intl";
-
-import { resolveFileIcon } from "@/shared/lib/file-display";
+import * as React from "react";
+import { AnimatedText } from "@/components/ui/animated-text";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { CenteredEmptyState } from "@/components/ui/empty-state";
-import { Spinner } from "@/components/ui/spinner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,10 +13,14 @@ import {
   DropdownMenuItemIcon,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { CenteredEmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
-import { useLoadMoreSentinel } from "@/shared/hooks/use-load-more-sentinel";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { FileObjectDTO } from "@/shared/api/file.types";
+import { useLoadMoreSentinel } from "@/shared/hooks/use-load-more-sentinel";
+import { resolveFileIcon } from "@/shared/lib/file-display";
+import { canManuallyVectorizeFile, isVectorIndexOutdated } from "@/shared/lib/file-processing";
 
 type SidebarListProps = {
   items: FileObjectDTO[];
@@ -29,6 +30,7 @@ type SidebarListProps = {
   loadingMore: boolean;
   hasMore: boolean;
   syncing: boolean;
+  vectorizingFileIDs: string[];
   renamingFileID: string | null;
   renameValue: string;
   onSelect: (fileID: string) => void;
@@ -38,6 +40,7 @@ type SidebarListProps = {
   onRenameValueChange: (value: string) => void;
   onRenameCommit: (fileID: string, currentFileName: string) => void;
   onRenameCancel: () => void;
+  onVectorize: (fileID: string) => void;
   onDeleteRequest: (item: FileObjectDTO) => void;
 };
 
@@ -45,6 +48,8 @@ function SidebarListItem({
   item,
   selected,
   checked,
+  vectorizing,
+  vectorizationBusy,
   renaming,
   renameValue,
   onSelect,
@@ -53,11 +58,14 @@ function SidebarListItem({
   onRenameValueChange,
   onRenameCommit,
   onRenameCancel,
+  onVectorize,
   onDeleteRequest,
 }: {
   item: FileObjectDTO;
   selected: boolean;
   checked: boolean;
+  vectorizing: boolean;
+  vectorizationBusy: boolean;
   renaming: boolean;
   renameValue: string;
   onSelect: (fileID: string) => void;
@@ -66,10 +74,14 @@ function SidebarListItem({
   onRenameValueChange: (value: string) => void;
   onRenameCommit: (fileID: string, currentFileName: string) => void;
   onRenameCancel: () => void;
+  onVectorize: (fileID: string) => void;
   onDeleteRequest: (item: FileObjectDTO) => void;
 }) {
   const t = useTranslations("files");
   const fileIcon = resolveFileIcon(item);
+  const showsRetrievalStatus = item.fileCategory !== "image" && item.embedStatus === "ready";
+  const vectorizable = canManuallyVectorizeFile(item);
+  const [actionsMenuOpen, setActionsMenuOpen] = React.useState(false);
 
   if (renaming) {
     return (
@@ -97,7 +109,10 @@ function SidebarListItem({
   }
 
   return (
-    <div className="group relative h-8 w-full max-w-full min-w-0 overflow-hidden rounded-md">
+    <div
+      className="group relative h-8 w-full max-w-full min-w-0 overflow-hidden rounded-md"
+      data-animated-text-scroll-trigger
+    >
       <Checkbox
         checked={checked}
         className="absolute left-1.5 top-1/2 z-20 size-3 -translate-y-1/2"
@@ -109,7 +124,10 @@ function SidebarListItem({
         type="button"
         variant="ghost"
         className={cn(
-          "h-8 w-full max-w-full justify-start gap-2 overflow-hidden rounded-md py-0 pl-7 pr-12 text-left text-xs font-normal shadow-none",
+          "h-8 w-full max-w-full justify-start gap-2 overflow-hidden rounded-md py-0 pl-7 text-left text-xs font-normal shadow-none",
+          actionsMenuOpen
+            ? showsRetrievalStatus ? "pr-18" : "pr-12"
+            : showsRetrievalStatus ? "pr-7 group-hover:pr-18" : "pr-2 group-hover:pr-12",
           selected ? "bg-accent text-accent-foreground hover:bg-accent" : "text-foreground hover:bg-accent/65 hover:text-foreground",
         )}
         onClick={() => onSelect(item.fileID)}
@@ -118,82 +136,103 @@ function SidebarListItem({
           {React.createElement(fileIcon, { className: "size-3 text-muted-foreground" })}
         </span>
 
-        <span className="min-w-0 flex-1 truncate text-xs" title={item.fileName}>{item.fileName}</span>
+        <AnimatedText
+          text={item.fileName}
+          className="min-w-0 flex-1 text-xs"
+          textClassName="text-current"
+          scrollOverflow
+        />
       </Button>
 
-      {item.fileCategory !== "image" && item.embedStatus === "ready" ? (
-        <span
-          title={item.ragOptOut ? t("list.ragDisabled") : t("list.ragReady")}
+      <div className="pointer-events-none absolute inset-y-0 right-1 z-20 flex items-center gap-0.5">
+        {showsRetrievalStatus ? (
+          <span
+            title={item.ragOptOut ? t("list.ragDisabled") : t("list.ragReady")}
+            className={cn(
+              "flex w-5 shrink-0 items-center justify-center",
+              item.ragOptOut ? "text-muted-foreground/40" : "text-primary/70",
+            )}
+          >
+            <Zap aria-hidden className="size-3" strokeWidth={1.5} />
+          </span>
+        ) : null}
+
+        <div
           className={cn(
-            "pointer-events-none absolute inset-y-0 right-1 z-10 flex w-5 items-center justify-center transition-opacity duration-150 group-hover:opacity-0 group-focus-within:opacity-0",
-            selected && "opacity-0",
-            item.ragOptOut ? "text-muted-foreground/40" : "text-primary/70",
+            "flex items-center gap-0.5 overflow-hidden transition-[max-width,opacity] duration-150",
+            actionsMenuOpen
+              ? "pointer-events-auto max-w-11 opacity-100"
+              : "pointer-events-none max-w-0 opacity-0 group-hover:pointer-events-auto group-hover:max-w-11 group-hover:opacity-100",
           )}
         >
-          <Zap aria-hidden className="size-3" strokeWidth={1.5} />
-        </span>
-      ) : null}
+          <DropdownMenu modal={false} open={actionsMenuOpen} onOpenChange={setActionsMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-5 shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                aria-label={t("actions.moreActions")}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                tabIndex={-1}
+              >
+                <Ellipsis className="size-3" strokeWidth={1} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-32">
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault();
+                  onToggleSelection(item.fileID, !checked);
+                }}
+              >
+                <DropdownMenuItemIcon icon={SquareCheckBig} />
+                {checked ? t("actions.cancelSelect") : t("actions.select")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault();
+                  onRenameStart(item);
+                }}
+              >
+                <DropdownMenuItemIcon icon={PencilLine} />
+                {t("actions.rename")}
+              </DropdownMenuItem>
+              {vectorizable ? (
+                <DropdownMenuItem
+                  disabled={vectorizationBusy}
+                  onSelect={() => onVectorize(item.fileID)}
+                >
+                  {vectorizing ? (
+                    <Spinner className="size-4 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <DropdownMenuItemIcon icon={DatabaseZap} />
+                  )}
+                  {t(isVectorIndexOutdated(item) ? "actions.updateIndex" : "actions.vectorize")}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-      <div
-        className={cn(
-          "absolute inset-y-0 right-1 z-20 flex items-center gap-0.5 transition-opacity duration-150",
-          selected ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
-        )}
-      >
-        <DropdownMenu modal={false}>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-5 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-              aria-label={t("actions.moreActions")}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-              }}
-              tabIndex={-1}
-            >
-              <Ellipsis className="size-3" strokeWidth={1} />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-32">
-            <DropdownMenuItem
-              onSelect={(event) => {
-                event.preventDefault();
-                onToggleSelection(item.fileID, !checked);
-              }}
-            >
-              <DropdownMenuItemIcon icon={SquareCheckBig} />
-              {checked ? t("actions.cancelSelect") : t("actions.select")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={(event) => {
-                event.preventDefault();
-                onRenameStart(item);
-              }}
-            >
-              <DropdownMenuItemIcon icon={PencilLine} />
-              {t("actions.rename")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="size-5 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label={t("actions.delete")}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onDeleteRequest(item);
-          }}
-          tabIndex={-1}
-        >
-          <Trash2 className="size-3" strokeWidth={1} />
-        </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-5 shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label={t("actions.delete")}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onDeleteRequest(item);
+            }}
+            tabIndex={-1}
+          >
+            <Trash2 className="size-3" strokeWidth={1} />
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -207,6 +246,7 @@ export function SidebarList({
   loadingMore,
   hasMore,
   syncing,
+  vectorizingFileIDs,
   renamingFileID,
   renameValue,
   onSelect,
@@ -216,11 +256,13 @@ export function SidebarList({
   onRenameValueChange,
   onRenameCommit,
   onRenameCancel,
+  onVectorize,
   onDeleteRequest,
 }: SidebarListProps) {
   const t = useTranslations("files");
   const scrollAreaRef = React.useRef<HTMLDivElement | null>(null);
   const selectedFileIDSet = React.useMemo(() => new Set(selectedFileIDs), [selectedFileIDs]);
+  const vectorizingFileIDSet = React.useMemo(() => new Set(vectorizingFileIDs), [vectorizingFileIDs]);
 
   const loadMoreRef = useLoadMoreSentinel<HTMLDivElement>({
     enabled: hasMore && !loading && !loadingMore,
@@ -266,6 +308,8 @@ export function SidebarList({
                   item={item}
                   selected={isSelected}
                   checked={isChecked}
+                  vectorizing={vectorizingFileIDSet.has(item.fileID)}
+                  vectorizationBusy={vectorizingFileIDs.length > 0}
                   renaming={isRenaming}
                   renameValue={renameValue}
                   onSelect={onSelect}
@@ -274,6 +318,7 @@ export function SidebarList({
                   onRenameValueChange={onRenameValueChange}
                   onRenameCommit={onRenameCommit}
                   onRenameCancel={onRenameCancel}
+                  onVectorize={onVectorize}
                   onDeleteRequest={onDeleteRequest}
                 />
               );
