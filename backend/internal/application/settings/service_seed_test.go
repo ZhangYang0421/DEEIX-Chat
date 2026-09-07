@@ -71,7 +71,7 @@ func TestSeedMigratesLegacyDefaultAllowedMIMETypes(t *testing.T) {
 	})
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	got := repo.items["file:allowed_mime_types"].Value
@@ -156,7 +156,7 @@ func TestSeedKeepsCustomAllowedMIMETypes(t *testing.T) {
 	})
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	got := repo.items["file:allowed_mime_types"].Value
@@ -169,7 +169,7 @@ func TestSeedUsesDefaultFullContextMaxBytesForMissingSetting(t *testing.T) {
 	repo := newSettingsSeedRepo()
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	want := strconv.FormatInt(config.DefaultFileFullContextMaxBytes, 10)
@@ -195,7 +195,7 @@ func TestSeedReplacesLegacyCompactTokenThresholdWithModelAwareDefaults(t *testin
 	)
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	if _, exists := repo.items["chat:context_compact_trigger_tokens"]; exists {
@@ -216,7 +216,7 @@ func TestSeedAddsMistralOCRDefaults(t *testing.T) {
 	repo := newSettingsSeedRepo()
 	service := NewService(repo, "test-data-encryption-key")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	want := map[string]string{
@@ -244,7 +244,7 @@ func TestSeedKeepsExistingFullContextMaxBytes(t *testing.T) {
 	})
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	if got := repo.items["file:file_full_context_max_bytes"].Value; got != existingValue {
@@ -271,7 +271,7 @@ func TestSeedMigratesLegacyDefaultModelOptionAllowedPaths(t *testing.T) {
 	})
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	got := repo.items["chat:model_option_allowed_paths"].Value
@@ -298,7 +298,7 @@ func TestSeedAddsXAIVideoToPreviousDefaultModelOptionAllowedPaths(t *testing.T) 
 	})
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	if got := repo.items["chat:model_option_allowed_paths"].Value; got != config.DefaultModelOptionAllowedPathsJSON() {
@@ -324,7 +324,7 @@ func TestSeedAddsXAIVideoExtensionsToPreviousDefaultModelOptionAllowedPaths(t *t
 	})
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	if got := repo.items["chat:model_option_allowed_paths"].Value; got != config.DefaultModelOptionAllowedPathsJSON() {
@@ -353,7 +353,7 @@ func TestSeedAddsGeminiThinkingSummariesToPreviousDefaultModelOptionAllowedPaths
 	})
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	if got := repo.items["chat:model_option_allowed_paths"].Value; got != config.DefaultModelOptionAllowedPathsJSON() {
@@ -386,7 +386,7 @@ func TestSeedReplacesLegacyGeminiInteractionsOptionPaths(t *testing.T) {
 	})
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	if got := repo.items["chat:model_option_allowed_paths"].Value; got != config.DefaultModelOptionAllowedPathsJSON() {
@@ -418,7 +418,7 @@ func TestSeedAddsGeminiGenerateContentThinkingPathsToPreviousDefaultModelOptionA
 	})
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	if got := repo.items["chat:model_option_allowed_paths"].Value; got != config.DefaultModelOptionAllowedPathsJSON() {
@@ -436,7 +436,7 @@ func TestSeedKeepsCustomModelOptionAllowedPaths(t *testing.T) {
 	})
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	got := repo.items["chat:model_option_allowed_paths"].Value

@@ -28,6 +28,7 @@ import type {
   ConversationSearchPageResponse,
   ConversationSearchResultResponse,
   ConversationShareResponse,
+  ConversationToolCallDetailResponse,
   MessageBillingCostResponse,
   MessageFeedbackResponse,
   MessageProcessTraceResponse,
@@ -123,6 +124,8 @@ export type PromptTraceBlockDTO = Omit<MessagePromptTraceBlockResponse, "sourceR
 export type PromptTraceSourceDTO = MessagePromptTraceSourceResponse;
 
 export type ContextArtifactDTO = ContextArtifactResponse;
+
+export type ConversationToolCallDetailDTO = ConversationToolCallDetailResponse;
 
 export type PromptTraceDTO = Omit<MessagePromptTraceResponse, "blocks"> & {
   blocks: PromptTraceBlockDTO[];
@@ -336,6 +339,8 @@ export type StreamMessageEvent =
       eventID?: string;
       direction?: "input" | "output" | string;
       categories?: string[];
+      /** 非空表示拦截后上游已产生的用量仍照常结算，取值与账本快照 `billed_reason` 一致。 */
+      billedReason?: string;
     }
   | {
       type: "compact_done";

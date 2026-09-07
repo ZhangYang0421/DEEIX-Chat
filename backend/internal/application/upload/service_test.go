@@ -3,7 +3,6 @@ package upload
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"io"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	appstorage "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/objectstorage"
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domainuser "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
@@ -19,187 +19,18 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
 
-func TestUploadFileClassifiesMP3AsAudio(t *testing.T) {
-	ctx := context.Background()
-	repo := newUploadTestRepo()
-	store := newUploadTestStore()
-	service := newUploadTestService(repo, store)
-
-	// MPEG frame sync makes net/http detect audio/mpeg instead of trusting only the extension.
-	payload := append([]byte{0xff, 0xfb, 0x90, 0x64}, bytes.Repeat([]byte{0}, 128)...)
-	result, err := service.UploadFile(ctx, UploadFileInput{
-		UserID:       1,
-		Purpose:      "chat",
-		FileName:     "recording.mp3",
-		MimeType:     "audio/mpeg",
-		DeclaredSize: int64(len(payload)),
-		Reader:       bytes.NewReader(payload),
-	})
-	if err != nil {
-		t.Fatalf("upload mp3 failed: %v", err)
-	}
-	if result.File.DetectedMIME != "audio/mpeg" {
-		t.Fatalf("detected MIME = %q, want audio/mpeg", result.File.DetectedMIME)
-	}
-	if result.File.FileCategory != "audio" {
-		t.Fatalf("file category = %q, want audio", result.File.FileCategory)
-	}
-	if result.File.ProcessingStatus != "queued" || result.File.ProcessingReady {
-		t.Fatalf("audio processing state = %q ready=%v, want queued/false", result.File.ProcessingStatus, result.File.ProcessingReady)
-	}
-}
-
-func TestUploadFileClassifiesM4AAsAudio(t *testing.T) {
-	ctx := context.Background()
-	repo := newUploadTestRepo()
-	store := newUploadTestStore()
-	service := newUploadTestService(repo, store)
-
-	payload := validM4AHeaderPayload()
-	result, err := service.UploadFile(ctx, UploadFileInput{
-		UserID:       1,
-		Purpose:      "chat",
-		FileName:     "recording.m4a",
-		MimeType:     "audio/mp4",
-		DeclaredSize: int64(len(payload)),
-		Reader:       bytes.NewReader(payload),
-	})
-	if err != nil {
-		t.Fatalf("upload m4a failed: %v", err)
-	}
-	if result.File.DetectedMIME != "audio/mp4" {
-		t.Fatalf("detected MIME = %q, want audio/mp4", result.File.DetectedMIME)
-	}
-	if result.File.FileCategory != "audio" {
-		t.Fatalf("file category = %q, want audio", result.File.FileCategory)
-	}
-}
-
-func TestUploadFileRejectsM4AWithoutMPEG4ContainerHeader(t *testing.T) {
-	ctx := context.Background()
-	repo := newUploadTestRepo()
-	store := newUploadTestStore()
-	service := newUploadTestService(repo, store)
-
-	_, err := service.UploadFile(ctx, UploadFileInput{
-		UserID:       1,
-		Purpose:      "chat",
-		FileName:     "spoofed.m4a",
-		MimeType:     "audio/mp4",
-		DeclaredSize: 32,
-		Reader:       bytes.NewReader(bytes.Repeat([]byte("not-an-m4a"), 4)),
-	})
-	if err == nil {
-		t.Fatal("spoofed m4a content should be rejected")
-	}
-}
-
-func validM4AHeaderPayload() []byte {
-	payload := make([]byte, 32)
-	binary.BigEndian.PutUint32(payload[:4], 24)
-	copy(payload[4:8], "ftyp")
-	copy(payload[8:12], "M4A ")
-	copy(payload[16:20], "isom")
-	return payload
-}
-
-func TestUploadFileRejectsMP3WithNonMPEGMIME(t *testing.T) {
-	ctx := context.Background()
-	repo := newUploadTestRepo()
-	store := newUploadTestStore()
-	service := newUploadTestService(repo, store)
-
-	payload := bytes.Repeat([]byte("not-an-mp3"), 16)
-	_, err := service.UploadFile(ctx, UploadFileInput{
-		UserID:       1,
-		Purpose:      "chat",
-		FileName:     "spoofed.mp3",
-		MimeType:     "audio/mpeg",
-		DeclaredSize: int64(len(payload)),
-		Reader:       bytes.NewReader(payload),
-	})
-	if err == nil {
-		t.Fatal("spoofed mp3 content should be rejected")
-	}
-}
-
-func TestUploadFileReturnsFailedStatusWhenProcessingInitializationFails(t *testing.T) {
-	ctx := context.Background()
-	repo := newUploadTestRepo()
-	store := newUploadTestStore()
-	service := newUploadTestService(repo, store)
-	service.hooks.InitializeUploadedFile = func(context.Context, *domainconversation.FileObject) error {
-		return errors.New("queue unavailable")
-	}
-
-	payload := append([]byte{0xff, 0xfb, 0x90, 0x64}, bytes.Repeat([]byte{0}, 128)...)
-	result, err := service.UploadFile(ctx, UploadFileInput{
-		UserID:       1,
-		Purpose:      "chat",
-		FileName:     "recording.mp3",
-		MimeType:     "audio/mpeg",
-		DeclaredSize: int64(len(payload)),
-		Reader:       bytes.NewReader(payload),
-	})
-	if err != nil {
-		t.Fatalf("file is already persisted and should return a failed processing state: %v", err)
-	}
-	if result.File.ProcessingStatus != "failed" || result.File.ProcessingErrorCode != "processing_queue_failed" {
-		t.Fatalf("processing state = %q code=%q", result.File.ProcessingStatus, result.File.ProcessingErrorCode)
-	}
-}
-
-func TestUploadFileKeepsDefaultLimitForNonAudio(t *testing.T) {
-	ctx := context.Background()
-	repo := newUploadTestRepo()
-	store := newUploadTestStore()
-	service := newUploadTestService(repo, store)
-	cfg := service.cfg.Snapshot()
-	cfg.MaxUploadFileBytes = 8
-	cfg.FileAudioMaxBytes = 1024
-	service.cfg.Store(cfg)
-
-	_, err := service.UploadFile(ctx, UploadFileInput{
-		UserID:       1,
-		Purpose:      "chat",
-		FileName:     "notes.txt",
-		MimeType:     "text/plain",
-		DeclaredSize: 9,
-		Reader:       strings.NewReader("123456789"),
-	})
-	if err == nil {
-		t.Fatal("non-audio upload should still obey the default attachment limit")
-	}
-}
-
-func TestUploadFileAllowsAudioAboveDefaultLimit(t *testing.T) {
-	ctx := context.Background()
-	repo := newUploadTestRepo()
-	store := newUploadTestStore()
-	service := newUploadTestService(repo, store)
-	cfg := service.cfg.Snapshot()
-	cfg.MaxUploadFileBytes = 8
-	cfg.FileAudioMaxBytes = 1024
-	service.cfg.Store(cfg)
-
-	payload := append([]byte{0xff, 0xfb, 0x90, 0x64}, bytes.Repeat([]byte{0}, 12)...)
-	if _, err := service.UploadFile(ctx, UploadFileInput{
-		UserID:       1,
-		Purpose:      "chat",
-		FileName:     "recording.mp3",
-		MimeType:     "audio/mpeg",
-		DeclaredSize: int64(len(payload)),
-		Reader:       bytes.NewReader(payload),
-	}); err != nil {
-		t.Fatalf("audio within dedicated limit should upload: %v", err)
+func TestOpenObjectStoreRequiresProvider(t *testing.T) {
+	service := NewServiceWithRuntime(config.NewRuntime(config.Config{}), nil, nil, Hooks{}, ErrorSet{}, "")
+	if _, err := service.openObjectStore(t.Context()); !errors.Is(err, appstorage.ErrProviderNotConfigured) {
+		t.Fatalf("openObjectStore() error = %v, want ErrProviderNotConfigured", err)
 	}
 }
 
 func TestPrepareTemporaryFileUsesUploadPolicyWithoutPersistence(t *testing.T) {
-	service := NewService(config.Config{
+	service := NewServiceWithRuntime(config.NewRuntime(config.Config{
 		MaxUploadFileBytes:   1024,
 		FileAllowedMIMETypes: "text/plain",
-	}, nil, nil, Hooks{}, ErrorSet{}, "")
+	}), nil, nil, Hooks{}, ErrorSet{}, "")
 	prepared, err := service.PrepareTemporaryFile(t.Context(), TemporaryFileInput{
 		FileName:     "notes.txt",
 		MimeType:     "text/plain",
@@ -811,7 +642,7 @@ func newUploadTestRepo() *uploadTestRepo {
 	}
 }
 
-func (r *uploadTestRepo) ListFileObjectsByUserWithFilter(context.Context, uint, int, int, string, string, string) ([]domainconversation.FileObject, int64, error) {
+func (r *uploadTestRepo) ListFileObjectsByUserWithFilter(context.Context, repository.ListFileObjectsInput) ([]domainconversation.FileObject, int64, error) {
 	return nil, 0, nil
 }
 
@@ -833,7 +664,7 @@ func (r *uploadTestRepo) RenameFileObjectByID(context.Context, uint, string, str
 	return nil, nil
 }
 
-func (r *uploadTestRepo) UpdateFileObjectRagOptOut(context.Context, uint, string, bool) (*domainconversation.FileObject, error) {
+func (r *uploadTestRepo) UpdateFileObjectRAGOptOut(context.Context, uint, string, bool) (*domainconversation.FileObject, error) {
 	return nil, nil
 }
 

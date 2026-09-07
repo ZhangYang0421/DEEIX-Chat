@@ -72,6 +72,14 @@ type GenerationStreamUpstreamThinkSnapshot struct {
 	MetadataJSON    string
 }
 
+// GenerationStreamLease 标识一次受执行权隔离保护的生成运行。
+type GenerationStreamLease struct {
+	RunID                string
+	ExecutionID          string
+	UserID               uint
+	ConversationPublicID string
+}
+
 // FileProcessingQueueRepository 封装文件处理队列缓存能力。
 type FileProcessingQueueRepository interface {
 	InitFileProcessingStream(ctx context.Context) error
@@ -95,23 +103,26 @@ type RAGCacheRepository interface {
 
 // GenerationStreamCacheRepository 封装对话生成流的短期恢复存储。
 type GenerationStreamCacheRepository interface {
-	RegisterGenerationStream(ctx context.Context, runID string, userID uint, conversationPublicID string, ttl time.Duration) error
+	// ClaimGenerationStream 原子获取运行执行权；同一租约可幂等重入，
+	// 逻辑运行归属保留期间拒绝其他执行接管。
+	ClaimGenerationStream(ctx context.Context, lease GenerationStreamLease, leaseTTL time.Duration, ownershipTTL time.Duration) (bool, error)
 	GetGenerationStreamOwner(ctx context.Context, runID string) (uint, bool, error)
-	TouchGenerationStreamActive(ctx context.Context, runID string, userID uint, ttl time.Duration) error
-	ClearGenerationStreamActive(ctx context.Context, runID string, userID uint) error
+	RenewGenerationStreamLease(ctx context.Context, lease GenerationStreamLease, leaseTTL time.Duration, ownershipTTL time.Duration) (bool, error)
+	CompleteGenerationStream(ctx context.Context, lease GenerationStreamLease, retention time.Duration) (bool, error)
+	AbandonGenerationStream(ctx context.Context, lease GenerationStreamLease) (bool, error)
 	IsGenerationStreamActive(ctx context.Context, runID string) (bool, error)
 	ListActiveGenerationStreams(ctx context.Context, userID uint) ([]ActiveGenerationStream, error)
-	RequestGenerationStreamCancel(ctx context.Context, runID string, ttl time.Duration) error
+	RequestGenerationStreamCancel(ctx context.Context, runID string, userID uint, ttl time.Duration) (bool, error)
 	IsGenerationStreamCanceled(ctx context.Context, runID string) (bool, error)
-	AppendGenerationStreamEvent(ctx context.Context, runID string, input GenerationStreamAppend, maxEvents int64, ttl time.Duration) (GenerationStreamMessage, error)
+	AppendGenerationStreamEvent(ctx context.Context, lease GenerationStreamLease, input GenerationStreamAppend, maxEvents int64, ttl time.Duration) (GenerationStreamMessage, bool, error)
+	AppendActiveGenerationEvent(ctx context.Context, input GenerationStreamAppend, maxEvents int64, ttl time.Duration) (GenerationStreamMessage, error)
 	GetGenerationStreamTextSnapshot(ctx context.Context, runID string) (GenerationStreamTextSnapshot, bool, error)
 	GetGenerationStreamUpstreamThinkSnapshot(ctx context.Context, runID string) (GenerationStreamUpstreamThinkSnapshot, bool, error)
 	ListGenerationStreamEvents(ctx context.Context, runID string, limit int64) ([]GenerationStreamMessage, error)
 	ReadGenerationStreamEvents(ctx context.Context, runID string, afterID string, block time.Duration, limit int64) ([]GenerationStreamMessage, error)
 	// ResetGenerationStreamEvents clears retained events while keeping owner metadata so
 	// blocked rounds cannot be replayed with withdrawn content on reconnect.
-	ResetGenerationStreamEvents(ctx context.Context, runID string) error
-	ExpireGenerationStream(ctx context.Context, runID string, ttl time.Duration) error
+	ResetGenerationStreamEvents(ctx context.Context, lease GenerationStreamLease) (bool, error)
 }
 
 // ActiveGenerationStream identifies one currently leased generation owned by a user.
@@ -129,7 +140,8 @@ type UserSettingCacheRepository interface {
 	SetUserSettingCache(ctx context.Context, userID uint, key, version, value string, ttl time.Duration) error
 }
 
-// ConversationCacheRepository 聚合 conversation 领域缓存能力。
+// ConversationCacheRepository 描述同一个缓存后端（Redis 或进程内存）对外提供的 conversation 领域全部缓存能力，
+// 由 infra 构造并在组合根按需拆分注入：处理流水线、RAG 与会话服务各自只依赖其中的子接口。
 type ConversationCacheRepository interface {
 	FileProcessingQueueRepository
 	RAGCacheRepository

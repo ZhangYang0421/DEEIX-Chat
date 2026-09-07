@@ -23,20 +23,6 @@ const (
 	maxAncestorQueryDepth    = 2000
 )
 
-// translateError 将 gorm 底层错误统一映射为仓储语义错误。
-func translateError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if dberror.IsRecordNotFound(err) {
-		return repository.ErrNotFound
-	}
-	if dberror.IsUniqueConstraint(err) {
-		return repository.ErrDuplicate
-	}
-	return err
-}
-
 func truncateText(value string, maxChars int) string {
 	if maxChars <= 0 {
 		return value
@@ -73,29 +59,19 @@ func (r *Repo) trimFunctionName() string {
 func (r *Repo) CreateConversation(ctx context.Context, item *domainconversation.Conversation) error {
 	entity := toConversationModel(item)
 	if err := r.db.WithContext(ctx).Create(&entity).Error; err != nil {
-		return translateError(err)
+		return dberror.Translate(err)
 	}
 	*item = toConversationDomain(entity)
 	return nil
 }
 
 // ListConversationsByUser 分页查询用户会话。
-func (r *Repo) ListConversationsByUser(
-	ctx context.Context,
-	userID uint,
-	offset int,
-	limit int,
-	statusFilter string,
-	starredFilter string,
-	shareFilter string,
-	projectFilter string,
-	searchQuery string,
-) ([]domainconversation.Conversation, int64, error) {
+func (r *Repo) ListConversationsByUser(ctx context.Context, input repository.ConversationListInput) ([]domainconversation.Conversation, int64, error) {
 	items := make([]models.Conversation, 0)
 	var total int64
-	query := r.db.WithContext(ctx).Model(&models.Conversation{}).Where("user_id = ?", userID)
+	query := r.db.WithContext(ctx).Model(&models.Conversation{}).Where("user_id = ?", input.UserID)
 
-	switch statusFilter {
+	switch input.StatusFilter {
 	case "archived":
 		query = query.Where("status = ?", "archived")
 	case "all":
@@ -104,7 +80,7 @@ func (r *Repo) ListConversationsByUser(
 		query = query.Where("status <> ?", "archived")
 	}
 
-	switch starredFilter {
+	switch input.StarredFilter {
 	case "starred":
 		query = query.Where("is_starred = ?", true)
 	case "unstarred":
@@ -118,20 +94,20 @@ func (r *Repo) ListConversationsByUser(
 			AND shares.user_id = chat_conversations.user_id
 			AND shares.status = ?
 	)`
-	switch shareFilter {
+	switch input.ShareFilter {
 	case "shared":
 		query = query.Where(activeShareExistsSQL, "active")
 	case "unshared":
 		query = query.Where("NOT "+activeShareExistsSQL, "active")
 	}
 
-	switch normalizedProjectFilter := strings.TrimSpace(projectFilter); normalizedProjectFilter {
+	switch normalizedProjectFilter := strings.TrimSpace(input.ProjectFilter); normalizedProjectFilter {
 	case "", "all":
 		// 保留全部项目归属。
 	case "unassigned":
 		query = query.Where("project_id IS NULL")
 	default:
-		project, err := r.GetConversationProjectByPublicID(ctx, userID, normalizedProjectFilter)
+		project, err := r.GetConversationProjectByPublicID(ctx, input.UserID, normalizedProjectFilter)
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
 				return []domainconversation.Conversation{}, 0, nil
@@ -141,13 +117,13 @@ func (r *Repo) ListConversationsByUser(
 		query = query.Where("project_id = ?", project.ID)
 	}
 
-	query = applyConversationSearchFilter(query, searchQuery)
+	query = applyConversationSearchFilter(query, input.SearchQuery)
 
 	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, translateError(err)
+		return nil, 0, dberror.Translate(err)
 	}
 	orderedQuery := query.Session(&gorm.Session{})
-	if starredFilter == "starred" {
+	if input.StarredFilter == "starred" {
 		orderedQuery = orderedQuery.
 			Order("starred_at DESC").
 			Order("id DESC")
@@ -156,10 +132,10 @@ func (r *Repo) ListConversationsByUser(
 			Order("updated_at DESC").
 			Order("id DESC")
 	}
-	if err := orderedQuery.Offset(offset).
-		Limit(limit).
+	if err := orderedQuery.Offset(input.Offset).
+		Limit(input.Limit).
 		Find(&items).Error; err != nil {
-		return nil, 0, translateError(err)
+		return nil, 0, dberror.Translate(err)
 	}
 	results := toConversationDomains(items)
 	if err := r.hydrateConversationShareSummaries(ctx, results); err != nil {
@@ -190,7 +166,7 @@ func (r *Repo) ListConversationsForSearch(
 		Offset(offset).
 		Limit(limit).
 		Find(&items).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 
 	results := toConversationDomains(items)
@@ -273,7 +249,7 @@ func (r *Repo) hydrateConversationShareSummaries(ctx context.Context, items []do
 		Order("updated_at DESC").
 		Order("id DESC").
 		Find(&shares).Error; err != nil {
-		return translateError(err)
+		return dberror.Translate(err)
 	}
 	latestByConversationID := make(map[uint]models.ConversationShare, len(shares))
 	for _, share := range shares {
@@ -337,7 +313,7 @@ func (r *Repo) hydrateConversationProjectSummaries(ctx context.Context, items []
 	if err := r.db.WithContext(ctx).
 		Where("id IN ?", projectIDs).
 		Find(&projects).Error; err != nil {
-		return translateError(err)
+		return dberror.Translate(err)
 	}
 	byID := make(map[uint]models.ConversationProject, len(projects))
 	for _, project := range projects {
@@ -376,7 +352,7 @@ func (r *Repo) GetConversationByUser(ctx context.Context, conversationID uint, u
 	if err := r.db.WithContext(ctx).
 		Where("id = ? AND user_id = ?", conversationID, userID).
 		First(&item).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	result := toConversationDomain(item)
 	if err := r.hydrateConversationShareSummary(ctx, &result); err != nil {
@@ -394,7 +370,7 @@ func (r *Repo) GetConversationByPublicID(ctx context.Context, publicID string, u
 	if err := r.db.WithContext(ctx).
 		Where("public_id = ? AND user_id = ?", publicID, userID).
 		First(&item).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	result := toConversationDomain(item)
 	if err := r.hydrateConversationShareSummary(ctx, &result); err != nil {
@@ -406,20 +382,6 @@ func (r *Repo) GetConversationByPublicID(ctx context.Context, publicID string, u
 	return &result, nil
 }
 
-// GetActiveConversationShareByConversation 查询会话当前有效分享。
-func (r *Repo) GetActiveConversationShareByConversation(ctx context.Context, userID uint, conversationID uint) (*domainconversation.ConversationShare, error) {
-	var item models.ConversationShare
-	if err := r.db.WithContext(ctx).
-		Where("user_id = ? AND conversation_id = ? AND status = ?", userID, conversationID, "active").
-		Order("updated_at DESC").
-		Order("id DESC").
-		First(&item).Error; err != nil {
-		return nil, translateError(err)
-	}
-	result := toConversationShareDomain(item)
-	return &result, nil
-}
-
 // GetLatestConversationShareByConversation 查询会话最近一次分享记录。
 func (r *Repo) GetLatestConversationShareByConversation(ctx context.Context, userID uint, conversationID uint) (*domainconversation.ConversationShare, error) {
 	var item models.ConversationShare
@@ -428,7 +390,7 @@ func (r *Repo) GetLatestConversationShareByConversation(ctx context.Context, use
 		Order("updated_at DESC").
 		Order("id DESC").
 		First(&item).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	result := toConversationShareDomain(item)
 	return &result, nil
@@ -440,27 +402,17 @@ func (r *Repo) GetActiveConversationShareByShareID(ctx context.Context, shareID 
 	if err := r.db.WithContext(ctx).
 		Where("share_id = ? AND status = ?", shareID, "active").
 		First(&share).Error; err != nil {
-		return nil, nil, translateError(err)
+		return nil, nil, dberror.Translate(err)
 	}
 	var conversation models.Conversation
 	if err := r.db.WithContext(ctx).
 		Where("id = ? AND user_id = ?", share.ConversationID, share.UserID).
 		First(&conversation).Error; err != nil {
-		return nil, nil, translateError(err)
+		return nil, nil, dberror.Translate(err)
 	}
 	shareDomain := toConversationShareDomain(share)
 	conversationDomain := toConversationDomain(conversation)
 	return &shareDomain, &conversationDomain, nil
-}
-
-// CreateConversationShare 创建会话公开分享快照。
-func (r *Repo) CreateConversationShare(ctx context.Context, item *domainconversation.ConversationShare) error {
-	entity := toConversationShareModel(item)
-	if err := r.db.WithContext(ctx).Create(&entity).Error; err != nil {
-		return translateError(err)
-	}
-	*item = toConversationShareDomain(entity)
-	return nil
 }
 
 // ReplaceActiveConversationShare 在一个事务内撤销旧分享并创建新快照。
@@ -468,26 +420,30 @@ func (r *Repo) ReplaceActiveConversationShare(ctx context.Context, item *domainc
 	if item == nil {
 		return nil
 	}
+	if r.db.Migrator().HasTable(&models.ConversationShare{}) &&
+		!r.db.Migrator().HasColumn(&models.ConversationShare{}, "default_message_ids_json") {
+		return repository.ErrConversationShareSchemaOutdated
+	}
 	var created models.ConversationShare
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		if err := tx.Model(&models.ConversationShare{}).
 			Where("user_id = ? AND conversation_id = ? AND status = ?", item.UserID, item.ConversationID, "active").
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"status":     "revoked",
 				"revoked_at": now,
 				"updated_at": now,
 			}).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		created = toConversationShareModel(item)
 		if err := tx.Create(&created).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		return nil
 	})
 	if err != nil {
-		return translateError(err)
+		return dberror.Translate(err)
 	}
 	*item = toConversationShareDomain(created)
 	return nil
@@ -499,10 +455,10 @@ func (r *Repo) RevokeActiveConversationShares(ctx context.Context, userID uint, 
 		return nil
 	}
 	now := time.Now().UTC()
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Model(&models.ConversationShare{}).
 		Where("user_id = ? AND conversation_id IN ? AND status = ?", userID, conversationIDs, "active").
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"status":     "revoked",
 			"revoked_at": now,
 			"updated_at": now,
@@ -511,7 +467,7 @@ func (r *Repo) RevokeActiveConversationShares(ctx context.Context, userID uint, 
 
 // TouchConversationShareAccess 记录公开分享访问时间。
 func (r *Repo) TouchConversationShareAccess(ctx context.Context, shareID string, accessedAt time.Time) error {
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Model(&models.ConversationShare{}).
 		Where("share_id = ? AND status = ?", shareID, "active").
 		Update("last_accessed_at", accessedAt).
@@ -530,7 +486,7 @@ func (r *Repo) UpdateConversationTitleByPublicID(
 		Where("user_id = ? AND public_id = ?", userID, publicID).
 		Update("title", title)
 	if result.Error != nil {
-		return nil, translateError(result.Error)
+		return nil, dberror.Translate(result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return nil, repository.ErrNotFound
@@ -540,7 +496,7 @@ func (r *Repo) UpdateConversationTitleByPublicID(
 
 // UpdateConversationMetadata 更新自动生成的会话元数据。
 func (r *Repo) UpdateConversationMetadata(ctx context.Context, conversationID uint, patch repository.ConversationMetadataPatch) (*domainconversation.Conversation, error) {
-	updates := map[string]interface{}{}
+	updates := map[string]any{}
 	if strings.TrimSpace(patch.Title) != "" {
 		replaceable := []string{"new chat", "新对话"}
 		for _, item := range patch.ReplaceableTitles {
@@ -558,7 +514,7 @@ func (r *Repo) UpdateConversationMetadata(ctx context.Context, conversationID ui
 	if len(updates) == 0 {
 		var current models.Conversation
 		if err := r.db.WithContext(ctx).Where("id = ?", conversationID).First(&current).Error; err != nil {
-			return nil, translateError(err)
+			return nil, dberror.Translate(err)
 		}
 		result := toConversationDomain(current)
 		return &result, nil
@@ -568,11 +524,11 @@ func (r *Repo) UpdateConversationMetadata(ctx context.Context, conversationID ui
 		Where("id = ?", conversationID).
 		Updates(updates)
 	if result.Error != nil {
-		return nil, translateError(result.Error)
+		return nil, dberror.Translate(result.Error)
 	}
 	var current models.Conversation
 	if err := r.db.WithContext(ctx).Where("id = ?", conversationID).First(&current).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	updated := toConversationDomain(current)
 	return &updated, nil
@@ -588,12 +544,12 @@ func (r *Repo) UpdateConversationLabelsByPublicID(
 	result := r.db.WithContext(ctx).
 		Model(&models.Conversation{}).
 		Where("user_id = ? AND public_id = ?", userID, publicID).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"labels_json":             strings.TrimSpace(labelsJSON),
 			"labels_manually_managed": true,
 		})
 	if result.Error != nil {
-		return nil, translateError(result.Error)
+		return nil, dberror.Translate(result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return nil, repository.ErrNotFound
@@ -617,12 +573,12 @@ func (r *Repo) SetGeneratedConversationLabelsIfEligible(
 		).
 		Update("labels_json", strings.TrimSpace(labelsJSON))
 	if result.Error != nil {
-		return nil, false, translateError(result.Error)
+		return nil, false, dberror.Translate(result.Error)
 	}
 
 	var current models.Conversation
 	if err := r.db.WithContext(ctx).Where("id = ?", conversationID).First(&current).Error; err != nil {
-		return nil, false, translateError(err)
+		return nil, false, dberror.Translate(err)
 	}
 	updated := toConversationDomain(current)
 	return &updated, result.RowsAffected > 0, nil
@@ -637,13 +593,13 @@ func (r *Repo) UpdateConversationStarByPublicID(
 ) (*domainconversation.Conversation, error) {
 	current, err := r.GetConversationByPublicID(ctx, publicID, userID)
 	if err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	if current.IsStarred == starred {
 		return current, nil
 	}
 
-	var starredAt interface{}
+	var starredAt any
 	if starred {
 		now := time.Now().UTC()
 		starredAt = &now
@@ -654,12 +610,12 @@ func (r *Repo) UpdateConversationStarByPublicID(
 	result := r.db.WithContext(ctx).
 		Model(&models.Conversation{}).
 		Where("user_id = ? AND public_id = ?", userID, publicID).
-		UpdateColumns(map[string]interface{}{
+		UpdateColumns(map[string]any{
 			"is_starred": starred,
 			"starred_at": starredAt,
 		})
 	if result.Error != nil {
-		return nil, translateError(result.Error)
+		return nil, dberror.Translate(result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return nil, repository.ErrNotFound
@@ -683,7 +639,7 @@ func (r *Repo) UpdateConversationArchiveByPublicID(
 		Where("user_id = ? AND public_id = ?", userID, publicID).
 		Update("status", nextStatus)
 	if result.Error != nil {
-		return nil, translateError(result.Error)
+		return nil, dberror.Translate(result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return nil, repository.ErrNotFound
@@ -700,10 +656,10 @@ func (r *Repo) DeleteConversationByPublicID(ctx context.Context, userID uint, pu
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("user_id = ? AND public_id = ?", userID, normalizedPublicID).
 			First(&item).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		if err := tx.Delete(&item).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		if !deleteFiles {
 			return nil
@@ -717,7 +673,7 @@ func (r *Repo) DeleteConversationByPublicID(ctx context.Context, userID uint, pu
 		return nil
 	})
 	if err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	return cleanupFileIDs, nil
 }
@@ -746,7 +702,7 @@ func listConversationFileCleanupCandidates(tx *gorm.DB, userID uint, conversatio
 		Where("NOT EXISTS (?)", activeReferenceQuery).
 		Order("a.file_id ASC").
 		Scan(&rows).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	fileIDs := make([]string, 0, len(rows))
 	for _, row := range rows {
@@ -790,10 +746,50 @@ func lockActiveFileObjectsForAttachments(tx *gorm.DB, userID uint, attachments [
 		Model(&models.FileObject{}).
 		Where("user_id = ? AND status = ? AND file_id IN ?", userID, "active", fileIDs).
 		Pluck("id", &lockedIDs).Error; err != nil {
-		return translateError(err)
+		return dberror.Translate(err)
 	}
 	if len(lockedIDs) != len(fileIDs) {
 		return repository.ErrNotFound
+	}
+	return nil
+}
+
+func ensureFileObjectUnreferencedByActiveConversations(tx *gorm.DB, userID uint, fileID string) error {
+	var activeReferences int64
+	if err := tx.Table("chat_attachments AS a").
+		Joins("JOIN chat_conversations AS c ON c.id = a.conversation_id AND c.user_id = a.user_id AND c.deleted_at IS NULL").
+		Where("a.user_id = ? AND a.file_id = ? AND a.status <> ?", userID, fileID, "deleted").
+		Count(&activeReferences).Error; err != nil {
+		return dberror.Translate(err)
+	}
+	if activeReferences > 0 {
+		return repository.ErrConflict
+	}
+	return nil
+}
+
+func ensureFileObjectUnreferencedByUserAvatars(tx *gorm.DB, fileID string) error {
+	var activeReferences int64
+	if err := tx.Model(&models.User{}).
+		Where("avatar_url LIKE 'file:%' AND avatar_url = ?", domainuser.BuildFileAvatarURL(fileID)).
+		Count(&activeReferences).Error; err != nil {
+		return dberror.Translate(err)
+	}
+	if activeReferences > 0 {
+		return repository.ErrConflict
+	}
+	return nil
+}
+
+func ensureFileObjectUnreferencedByKnowledgeBases(tx *gorm.DB, fileObjectID uint) error {
+	var activeReferences int64
+	if err := tx.Model(&models.KnowledgeBaseFile{}).
+		Where("file_object_id = ?", fileObjectID).
+		Count(&activeReferences).Error; err != nil {
+		return dberror.Translate(err)
+	}
+	if activeReferences > 0 {
+		return repository.ErrConflict
 	}
 	return nil
 }
@@ -802,7 +798,7 @@ func lockActiveFileObjectsForAttachments(tx *gorm.DB, userID uint, attachments [
 func (r *Repo) GetUserByID(ctx context.Context, userID uint) (*domainuser.User, error) {
 	var item models.User
 	if err := r.db.WithContext(ctx).Where("id = ?", userID).First(&item).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	result := toUserDomain(item)
 	return &result, nil
@@ -810,7 +806,7 @@ func (r *Repo) GetUserByID(ctx context.Context, userID uint) (*domainuser.User, 
 
 // IncrementMessageCount 增加消息计数。
 func (r *Repo) IncrementMessageCount(ctx context.Context, conversationID uint, delta int) error {
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Model(&models.Conversation{}).
 		Where("id = ?", conversationID).
 		Update("message_count", gorm.Expr("message_count + ?", delta)).
@@ -819,10 +815,10 @@ func (r *Repo) IncrementMessageCount(ctx context.Context, conversationID uint, d
 
 // UpdateConversationCompactedAt 更新会话最近压缩时间。
 func (r *Repo) UpdateConversationCompactedAt(ctx context.Context, conversationID uint, compactedAt time.Time) error {
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Model(&models.Conversation{}).
 		Where("id = ?", conversationID).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"last_compacted_at": compactedAt,
 		}).
 		Error)
@@ -830,11 +826,11 @@ func (r *Repo) UpdateConversationCompactedAt(ctx context.Context, conversationID
 
 // UpdateConversationLastResponseID 更新会话最近响应 ID。
 func (r *Repo) UpdateConversationLastResponseID(ctx context.Context, conversationID uint, responseID string) error {
-	updates := map[string]interface{}{"last_response_id": responseID}
+	updates := map[string]any{"last_response_id": responseID}
 	if strings.TrimSpace(responseID) == "" {
 		updates["last_prompt_fingerprint"] = ""
 	}
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Model(&models.Conversation{}).
 		Where("id = ?", conversationID).
 		Updates(updates).
@@ -843,10 +839,10 @@ func (r *Repo) UpdateConversationLastResponseID(ctx context.Context, conversatio
 
 // UpdateConversationStatefulResponse 同步更新最新响应 ID 与对应的本地上下文状态指纹。
 func (r *Repo) UpdateConversationStatefulResponse(ctx context.Context, conversationID uint, responseID string, promptFingerprint string) error {
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Model(&models.Conversation{}).
 		Where("id = ?", conversationID).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"last_response_id":        responseID,
 			"last_prompt_fingerprint": promptFingerprint,
 		}).
@@ -855,10 +851,10 @@ func (r *Repo) UpdateConversationStatefulResponse(ctx context.Context, conversat
 
 // UpdateConversationModel 更新会话当前使用模型与提供商。
 func (r *Repo) UpdateConversationModel(ctx context.Context, conversationID uint, platformModelName string, provider string) error {
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Model(&models.Conversation{}).
 		Where("id = ?", conversationID).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"model":    platformModelName,
 			"provider": provider,
 		}).
@@ -873,7 +869,7 @@ func (r *Repo) ListAllConversationsAfterID(ctx context.Context, afterID uint, li
 		query = query.Where("id > ?", afterID)
 	}
 	if err := query.Find(&rows).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	return toConversationDomains(rows), nil
 }
@@ -886,7 +882,7 @@ func (r *Repo) ListUserConversationsAfterID(ctx context.Context, userID uint, af
 		query = query.Where("id > ?", afterID)
 	}
 	if err := query.Find(&rows).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	return toConversationDomains(rows), nil
 }
@@ -896,7 +892,7 @@ func (r *Repo) CreateMessage(ctx context.Context, item *domainconversation.Messa
 	attachmentSnapshot := item.Attachments
 	entity := toMessageModel(item)
 	if err := r.db.WithContext(ctx).Create(&entity).Error; err != nil {
-		return translateError(err)
+		return dberror.Translate(err)
 	}
 	*item = toMessageDomain(entity)
 	item.Attachments = attachmentSnapshot
@@ -909,7 +905,7 @@ func (r *Repo) CreateAssistantBranchMessage(ctx context.Context, assistantMessag
 		return repository.ErrInvalidInput
 	}
 	attachmentSnapshot := assistantMessage.Attachments
-	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return dberror.Translate(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		entity := toMessageModel(assistantMessage)
 		if err := tx.Create(&entity).Error; err != nil {
 			return err
@@ -942,7 +938,7 @@ func (r *Repo) CreateMessagePairWithUserAttachments(
 	}
 	userAttachmentSnapshot := userMessage.Attachments
 	assistantAttachmentSnapshot := assistantMessage.Attachments
-	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return dberror.Translate(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		userEntity := toMessageModel(userMessage)
 		if err := tx.Create(&userEntity).Error; err != nil {
 			return err
@@ -1000,7 +996,7 @@ func (r *Repo) GetMessageByPublicID(
 	if err := r.db.WithContext(ctx).
 		Where("conversation_id = ? AND user_id = ? AND public_id = ?", conversationID, userID, publicID).
 		First(&item).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	single := []models.Message{item}
 	if err := r.hydrateMessageRefs(ctx, single); err != nil {
@@ -1020,7 +1016,7 @@ func (r *Repo) GetMessageByPublicIDForUser(ctx context.Context, userID uint, pub
 	if err := r.db.WithContext(ctx).
 		Where("user_id = ? AND public_id = ?", userID, publicID).
 		First(&item).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	single := []models.Message{item}
 	if err := r.hydrateMessageRefs(ctx, single); err != nil {
@@ -1038,26 +1034,22 @@ func (r *Repo) GetMessageByPublicIDForUser(ctx context.Context, userID uint, pub
 func (r *Repo) UpdateMessageUsage(
 	ctx context.Context,
 	messageID uint,
-	inputTokens int64,
-	outputTokens int64,
-	cacheReadTokens int64,
-	cacheWriteTokens int64,
-	reasoningTokens int64,
+	usage repository.MessageUsageUpdate,
 ) error {
-	tokenUsage := inputTokens + cacheReadTokens + cacheWriteTokens + outputTokens + reasoningTokens
+	tokenUsage := usage.InputTokens + usage.CacheReadTokens + usage.CacheWriteTokens + usage.OutputTokens + usage.ReasoningTokens
 	if tokenUsage < 0 {
 		tokenUsage = 0
 	}
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Model(&models.Message{}).
 		Where("id = ?", messageID).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"token_usage":        tokenUsage,
-			"input_tokens":       inputTokens,
-			"output_tokens":      outputTokens,
-			"cache_read_tokens":  cacheReadTokens,
-			"cache_write_tokens": cacheWriteTokens,
-			"reasoning_tokens":   reasoningTokens,
+			"input_tokens":       usage.InputTokens,
+			"output_tokens":      usage.OutputTokens,
+			"cache_read_tokens":  usage.CacheReadTokens,
+			"cache_write_tokens": usage.CacheWriteTokens,
+			"reasoning_tokens":   usage.ReasoningTokens,
 		}).
 		Error)
 }
@@ -1070,10 +1062,10 @@ func (r *Repo) UpdateMessageState(
 	errorCode string,
 	errorMessage string,
 ) error {
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Model(&models.Message{}).
 		Where("id = ?", messageID).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"status":        status,
 			"error_code":    errorCode,
 			"error_message": errorMessage,
@@ -1103,7 +1095,7 @@ func (r *Repo) UpdateAssistantMessageContent(
 		}
 		if err := tx.Model(&models.Message{}).
 			Where("id = ?", item.ID).
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"content":   content,
 				"edited_at": editedAt,
 			}).Error; err != nil {
@@ -1112,7 +1104,7 @@ func (r *Repo) UpdateAssistantMessageContent(
 		return tx.Where("id = ?", item.ID).First(&item).Error
 	})
 	if err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 
 	single := []models.Message{item}
@@ -1145,7 +1137,7 @@ func (r *Repo) CancelPendingGenerationMessagesByRunID(
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		userResult := tx.Model(&models.Message{}).
 			Where("user_id = ? AND run_id = ? AND role = ? AND status = ?", userID, normalizedRunID, "user", "pending").
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"status":        "success",
 				"error_code":    "",
 				"error_message": "",
@@ -1155,7 +1147,7 @@ func (r *Repo) CancelPendingGenerationMessagesByRunID(
 		}
 		assistantResult := tx.Model(&models.Message{}).
 			Where("user_id = ? AND run_id = ? AND role = ? AND status = ?", userID, normalizedRunID, "assistant", "pending").
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"status":        "canceled",
 				"error_code":    normalizedErrorCode,
 				"error_message": normalizedErrorMessage,
@@ -1167,7 +1159,7 @@ func (r *Repo) CancelPendingGenerationMessagesByRunID(
 		return nil
 	})
 	if err != nil {
-		return false, translateError(err)
+		return false, dberror.Translate(err)
 	}
 	return returnedRows > 0, nil
 }
@@ -1183,13 +1175,13 @@ func (r *Repo) InterruptPendingAssistantMessageByRunID(
 	result := r.db.WithContext(ctx).
 		Model(&models.Message{}).
 		Where("user_id = ? AND run_id = ? AND role = ? AND status = ?", userID, strings.TrimSpace(runID), "assistant", "pending").
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"status":        "error",
 			"error_code":    strings.TrimSpace(errorCode),
 			"error_message": truncateText(strings.TrimSpace(errorMessage), 255),
 		})
 	if result.Error != nil {
-		return false, translateError(result.Error)
+		return false, dberror.Translate(result.Error)
 	}
 	return result.RowsAffected > 0, nil
 }
@@ -1207,7 +1199,7 @@ func (r *Repo) UpdateAssistantMessageCompletion(
 	if update.LatencyMS < 0 {
 		update.LatencyMS = 0
 	}
-	updates := map[string]interface{}{
+	updates := map[string]any{
 		"content":            update.Content,
 		"reasoning_content":  update.ReasoningContent,
 		"token_usage":        tokenUsage,
@@ -1224,7 +1216,7 @@ func (r *Repo) UpdateAssistantMessageCompletion(
 	if update.KnowledgeSources != nil {
 		updates["knowledge_sources_json"] = marshalMessageKnowledgeSources(update.KnowledgeSources)
 	}
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Model(&models.Message{}).
 		Where("id = ?", messageID).
 		Updates(updates).
@@ -1240,7 +1232,7 @@ func (r *Repo) CompleteAssistantMessageWithAttachments(
 	assistantCompletion repository.AssistantMessageCompletionUpdate,
 	assistantAttachments []domainconversation.Attachment,
 ) error {
-	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return dberror.Translate(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if len(assistantAttachments) > 0 {
 			if err := lockActiveFileObjectsForAttachments(tx, 0, assistantAttachments); err != nil {
 				return err
@@ -1262,7 +1254,7 @@ func (r *Repo) CompleteAssistantMessageWithAttachments(
 		}
 		if err := tx.Model(&models.Message{}).
 			Where("id = ?", userMessageID).
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"token_usage":        userTokenUsage,
 				"input_tokens":       userUsage.InputTokens,
 				"output_tokens":      userUsage.OutputTokens,
@@ -1281,7 +1273,7 @@ func (r *Repo) CompleteAssistantMessageWithAttachments(
 		if latencyMS < 0 {
 			latencyMS = 0
 		}
-		updates := map[string]interface{}{
+		updates := map[string]any{
 			"content":            assistantCompletion.Content,
 			"reasoning_content":  assistantCompletion.ReasoningContent,
 			"token_usage":        assistantTokenUsage,
@@ -1314,7 +1306,7 @@ func (r *Repo) CompleteAssistantMessageWithGeneratedAttachments(
 	assistantCompletion repository.AssistantMessageCompletionUpdate,
 	assistantAttachments []domainconversation.Attachment,
 ) error {
-	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return dberror.Translate(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if len(assistantAttachments) > 0 {
 			if err := lockActiveFileObjectsForAttachments(tx, 0, assistantAttachments); err != nil {
 				return err
@@ -1338,7 +1330,7 @@ func (r *Repo) CompleteAssistantMessageWithGeneratedAttachments(
 		if latencyMS < 0 {
 			latencyMS = 0
 		}
-		updates := map[string]interface{}{
+		updates := map[string]any{
 			"content":            assistantCompletion.Content,
 			"reasoning_content":  assistantCompletion.ReasoningContent,
 			"token_usage":        assistantTokenUsage,
@@ -1369,10 +1361,10 @@ func (r *Repo) UpdateMessageBilling(ctx context.Context, messageID uint, billedC
 	if billedNanousd < 0 {
 		billedNanousd = 0
 	}
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Model(&models.Message{}).
 		Where("id = ?", messageID).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"billed_currency":  billedCurrency,
 			"billed_nanousd":   billedNanousd,
 			"pricing_snapshot": pricingSnapshot,
@@ -1389,7 +1381,7 @@ func (r *Repo) ListMessages(ctx context.Context, conversationID uint, offset int
 		Model(&models.Message{}).
 		Where("conversation_id = ?", conversationID).
 		Count(&total).Error; err != nil {
-		return nil, 0, translateError(err)
+		return nil, 0, dberror.Translate(err)
 	}
 	if err := r.db.WithContext(ctx).
 		Where("conversation_id = ?", conversationID).
@@ -1397,7 +1389,7 @@ func (r *Repo) ListMessages(ctx context.Context, conversationID uint, offset int
 		Offset(offset).
 		Limit(limit).
 		Find(&items).Error; err != nil {
-		return nil, 0, translateError(err)
+		return nil, 0, dberror.Translate(err)
 	}
 	if err := r.hydrateMessageRefs(ctx, items); err != nil {
 		return nil, 0, err
@@ -1423,7 +1415,7 @@ func (r *Repo) ListMessagesBeforeID(ctx context.Context, conversationID uint, be
 		Model(&models.Message{}).
 		Where("conversation_id = ?", conversationID).
 		Count(&total).Error; err != nil {
-		return nil, 0, translateError(err)
+		return nil, 0, dberror.Translate(err)
 	}
 
 	if err := r.db.WithContext(ctx).
@@ -1431,7 +1423,7 @@ func (r *Repo) ListMessagesBeforeID(ctx context.Context, conversationID uint, be
 		Order("id DESC").
 		Limit(limit).
 		Find(&items).Error; err != nil {
-		return nil, 0, translateError(err)
+		return nil, 0, dberror.Translate(err)
 	}
 	for left, right := 0, len(items)-1; left < right; left, right = left+1, right-1 {
 		items[left], items[right] = items[right], items[left]
@@ -1453,7 +1445,7 @@ func (r *Repo) ListMessagesForShare(ctx context.Context, conversationID uint, pu
 		query = query.Where("public_id IN ?", publicIDs)
 	}
 	if err := query.Order("id ASC").Find(&items).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	if err := r.hydrateMessageRefs(ctx, items); err != nil {
 		return nil, err
@@ -1487,7 +1479,7 @@ func (r *Repo) ListAllMessages(ctx context.Context, conversationID uint) ([]doma
 		Where("conversation_id = ?", conversationID).
 		Order("id ASC").
 		Find(&items).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	if err := r.hydrateMessageRefs(ctx, items); err != nil {
 		return nil, err
@@ -1501,7 +1493,7 @@ func (r *Repo) ListAllMessages(ctx context.Context, conversationID uint) ([]doma
 // UpsertMessageFeedback 写入或更新消息反馈。
 func (r *Repo) UpsertMessageFeedback(ctx context.Context, item *domainconversation.MessageFeedback) error {
 	entity := toMessageFeedbackModel(item)
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{
 				{Name: "user_id"},
@@ -1518,7 +1510,7 @@ func (r *Repo) UpsertMessageFeedback(ctx context.Context, item *domainconversati
 
 // DeleteMessageFeedback 删除用户对消息的反馈。
 func (r *Repo) DeleteMessageFeedback(ctx context.Context, userID uint, messageID uint) error {
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Where("user_id = ? AND message_id = ?", userID, messageID).
 		Delete(&models.ConversationMessageFeedback{}).Error)
 }
@@ -1538,7 +1530,7 @@ func (r *Repo) GetUserMessageFeedbackMap(
 	if err := r.db.WithContext(ctx).
 		Where("user_id = ? AND message_id IN ?", userID, messageIDs).
 		Find(&items).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	for _, item := range items {
 		result[item.MessageID] = item.Feedback
@@ -1569,7 +1561,7 @@ func (r *Repo) GetMessageFeedbackCounts(
 		Where("message_id IN ?", messageIDs).
 		Group("message_id, feedback").
 		Scan(&rows).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 
 	for _, row := range rows {
@@ -1595,7 +1587,7 @@ func (r *Repo) CreateAttachments(ctx context.Context, items []domainconversation
 	for i := range items {
 		entities = append(entities, toAttachmentModel(&items[i]))
 	}
-	return translateError(r.db.WithContext(ctx).Create(&entities).Error)
+	return dberror.Translate(r.db.WithContext(ctx).Create(&entities).Error)
 }
 
 const (
@@ -1606,22 +1598,31 @@ const (
 	chatContextRecordArtifact   = "artifact"
 )
 
-const maxConversationEventDetailPayloadBytes = 1024 * 1024
+// maxConversationEventDetailJSONBytes 限制单个详情字段进入应用内存与 HTTP 响应的大小。
+const maxConversationEventDetailJSONBytes = 1024 * 1024
 
-func conversationEventPayloadSizeExpression(db *gorm.DB) string {
+// maxConversationToolCallDetailJSONBytes 限制用户按需查看单个工具调用原始结果的大小。
+const maxConversationToolCallDetailJSONBytes = 8 * 1024 * 1024
+
+func conversationEventJSONSizeExpression(db *gorm.DB, column string) string {
+	switch column {
+	case "payload_json", "input_json", "output_json", "error_json":
+	default:
+		panic("unsupported conversation event JSON column")
+	}
 	if db != nil && db.Dialector != nil {
 		switch db.Dialector.Name() {
 		case "postgres":
-			return "OCTET_LENGTH(payload_json)"
+			return fmt.Sprintf("OCTET_LENGTH(%s)", column)
 		case "sqlite":
-			return "LENGTH(CAST(payload_json AS BLOB))"
+			return fmt.Sprintf("LENGTH(CAST(%s AS BLOB))", column)
 		}
 	}
-	return "LENGTH(payload_json)"
+	return fmt.Sprintf("LENGTH(%s)", column)
 }
 
 func conversationEventSummarySelectColumns(db *gorm.DB) []string {
-	payloadSize := conversationEventPayloadSizeExpression(db)
+	payloadSize := conversationEventJSONSizeExpression(db, "payload_json")
 	return []string{
 		"id",
 		"message_id",
@@ -1647,96 +1648,120 @@ func conversationEventSummarySelectColumns(db *gorm.DB) []string {
 		"created_at",
 		"updated_at",
 		payloadSize + " AS payload_size_bytes",
-		fmt.Sprintf("CASE WHEN %s > %d THEN TRUE ELSE FALSE END AS payload_omitted", payloadSize, maxConversationEventDetailPayloadBytes),
+		fmt.Sprintf("CASE WHEN %s > %d THEN TRUE ELSE FALSE END AS payload_omitted", payloadSize, maxConversationEventDetailJSONBytes),
 	}
 }
 
 func conversationEventDetailSelectColumns(db *gorm.DB) []string {
-	payloadSize := conversationEventPayloadSizeExpression(db)
+	payloadSize := conversationEventJSONSizeExpression(db, "payload_json")
+	inputSize := conversationEventJSONSizeExpression(db, "input_json")
+	outputSize := conversationEventJSONSizeExpression(db, "output_json")
+	errorSize := conversationEventJSONSizeExpression(db, "error_json")
 	return append(
 		conversationEventSummarySelectColumns(db),
 		"content_markdown",
-		fmt.Sprintf("CASE WHEN %s <= %d THEN payload_json ELSE '' END AS payload_json", payloadSize, maxConversationEventDetailPayloadBytes),
-		"input_json",
-		"output_json",
-		"error_json",
+		fmt.Sprintf("CASE WHEN %s <= %d THEN payload_json ELSE '' END AS payload_json", payloadSize, maxConversationEventDetailJSONBytes),
+		inputSize+" AS input_size_bytes",
+		fmt.Sprintf("CASE WHEN %s > %d THEN TRUE ELSE FALSE END AS input_omitted", inputSize, maxConversationEventDetailJSONBytes),
+		fmt.Sprintf("CASE WHEN %s <= %d THEN input_json ELSE '' END AS input_json", inputSize, maxConversationEventDetailJSONBytes),
+		outputSize+" AS output_size_bytes",
+		fmt.Sprintf("CASE WHEN %s > %d THEN TRUE ELSE FALSE END AS output_omitted", outputSize, maxConversationEventDetailJSONBytes),
+		fmt.Sprintf("CASE WHEN %s <= %d THEN output_json ELSE '' END AS output_json", outputSize, maxConversationEventDetailJSONBytes),
+		errorSize+" AS error_size_bytes",
+		fmt.Sprintf("CASE WHEN %s > %d THEN TRUE ELSE FALSE END AS error_omitted", errorSize, maxConversationEventDetailJSONBytes),
+		fmt.Sprintf("CASE WHEN %s <= %d THEN error_json ELSE '' END AS error_json", errorSize, maxConversationEventDetailJSONBytes),
 	)
 }
 
-// CreateConversationRun 写入会话运行日志。
+func conversationToolCallDetailSelectColumns(db *gorm.DB) []string {
+	outputSize := conversationEventJSONSizeExpression(db, "output_json")
+	errorSize := conversationEventJSONSizeExpression(db, "error_json")
+	totalSize := "(" + outputSize + " + " + errorSize + ")"
+	return []string{
+		"run_id",
+		"tool_call_id",
+		"tool_name",
+		"status",
+		outputSize + " AS output_size_bytes",
+		fmt.Sprintf("CASE WHEN %s > 0 AND %s > %d THEN TRUE ELSE FALSE END AS output_omitted", outputSize, totalSize, maxConversationToolCallDetailJSONBytes),
+		fmt.Sprintf("CASE WHEN %s <= %d THEN output_json ELSE '' END AS output_json", totalSize, maxConversationToolCallDetailJSONBytes),
+		errorSize + " AS error_size_bytes",
+		fmt.Sprintf("CASE WHEN %s > 0 AND %s > %d THEN TRUE ELSE FALSE END AS error_omitted", errorSize, totalSize, maxConversationToolCallDetailJSONBytes),
+		fmt.Sprintf("CASE WHEN %s <= %d THEN error_json ELSE '' END AS error_json", totalSize, maxConversationToolCallDetailJSONBytes),
+	}
+}
+
+// CreateConversationRun 原子占用全局唯一的运行 ID。
 func (r *Repo) CreateConversationRun(ctx context.Context, item *domainconversation.Run) error {
+	if item == nil || strings.TrimSpace(item.RunID) == "" || item.UserID == 0 || item.ConversationID == 0 {
+		return repository.ErrInvalidInput
+	}
 	entity := toConversationRunModel(item)
 	if err := r.db.WithContext(ctx).Create(&entity).Error; err != nil {
-		return translateError(err)
+		return dberror.Translate(err)
 	}
 	*item = toConversationRunDomain(entity)
 	return nil
 }
 
-// EnsureConversationRun inserts a run row when missing so mid-flight moderation updates have a target.
-func (r *Repo) EnsureConversationRun(ctx context.Context, item *domainconversation.Run) error {
-	if item == nil || strings.TrimSpace(item.RunID) == "" {
-		return nil
+// UpdateConversationRun 更新已占用的运行快照且不允许转移运行归属。
+func (r *Repo) UpdateConversationRun(ctx context.Context, item *domainconversation.Run) error {
+	if item == nil || strings.TrimSpace(item.RunID) == "" || item.UserID == 0 || item.ConversationID == 0 {
+		return repository.ErrInvalidInput
 	}
 	entity := toConversationRunModel(item)
-	return translateError(r.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "run_id"}},
-			DoNothing: true,
-		}).
-		Create(&entity).Error)
-}
-
-// UpsertConversationRun writes the final run snapshot (create or full update by run_id).
-func (r *Repo) UpsertConversationRun(ctx context.Context, item *domainconversation.Run) error {
-	if item == nil || strings.TrimSpace(item.RunID) == "" {
-		return nil
+	result := r.db.WithContext(ctx).
+		Model(&models.ConversationRun{}).
+		Where("run_id = ? AND user_id = ? AND conversation_id = ?", strings.TrimSpace(item.RunID), item.UserID, item.ConversationID).
+		Select(
+			"request_id",
+			"task_type",
+			"endpoint",
+			"provider",
+			"provider_protocol",
+			"upstream_id",
+			"upstream_model_id",
+			"upstream_name",
+			"requested_model_name",
+			"platform_model_name",
+			"routed_binding_code",
+			"model_vendor",
+			"model_icon",
+			"upstream_model_name",
+			"input_tokens",
+			"output_tokens",
+			"cache_read_tokens",
+			"cache_write_tokens",
+			"reasoning_tokens",
+			"tool_calls_count",
+			"first_token_latency_ms",
+			"total_latency_ms",
+			"status",
+			"error_code",
+			"error_message",
+			"moderation_state",
+			"moderation_event_id",
+			"moderation_categories_json",
+			"started_at",
+			"ended_at",
+		).
+		Updates(&entity)
+	if result.Error != nil {
+		return dberror.Translate(result.Error)
 	}
-	entity := toConversationRunModel(item)
-	err := r.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "run_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{
-				"request_id",
-				"user_id",
-				"conversation_id",
-				"task_type",
-				"endpoint",
-				"provider",
-				"provider_protocol",
-				"upstream_id",
-				"upstream_model_id",
-				"upstream_name",
-				"requested_model_name",
-				"platform_model_name",
-				"routed_binding_code",
-				"model_vendor",
-				"model_icon",
-				"upstream_model_name",
-				"input_tokens",
-				"output_tokens",
-				"cache_read_tokens",
-				"cache_write_tokens",
-				"reasoning_tokens",
-				"tool_calls_count",
-				"first_token_latency_ms",
-				"total_latency_ms",
-				"status",
-				"error_code",
-				"error_message",
-				"moderation_state",
-				"moderation_event_id",
-				"moderation_categories_json",
-				"started_at",
-				"ended_at",
-				"updated_at",
-			}),
-		}).
-		Create(&entity).Error
-	if err != nil {
-		return translateError(err)
+	if result.RowsAffected == 0 {
+		var count int64
+		if err := r.db.WithContext(ctx).
+			Model(&models.ConversationRun{}).
+			Where("run_id = ?", strings.TrimSpace(item.RunID)).
+			Count(&count).Error; err != nil {
+			return dberror.Translate(err)
+		}
+		if count > 0 {
+			return repository.ErrConflict
+		}
+		return repository.ErrNotFound
 	}
-	*item = toConversationRunDomain(entity)
 	return nil
 }
 
@@ -1746,7 +1771,7 @@ func (r *Repo) UpsertConversationMessageTrace(ctx context.Context, item *domainc
 		return nil
 	}
 	entity := toConversationMessageTraceModel(item)
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{
 				{Name: "run_id"},
@@ -1787,7 +1812,7 @@ func (r *Repo) ListConversationMessageTracesByMessageIDs(ctx context.Context, me
 		Where("message_id IN ? AND event_scope = ?", messageIDs, chatRunEventScopeTraceBlock).
 		Order("message_id ASC, seq ASC, id ASC").
 		Find(&items).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	return toConversationMessageTraceDomains(items), nil
 }
@@ -1798,7 +1823,7 @@ func (r *Repo) UpsertConversationMessageTraceEvent(ctx context.Context, item *do
 		return nil
 	}
 	entity := toConversationMessageTraceEventModel(item)
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{
 				{Name: "run_id"},
@@ -1839,7 +1864,7 @@ func (r *Repo) ListConversationMessageTraceEventsByMessageIDs(ctx context.Contex
 		Where("message_id IN ? AND event_scope = ?", messageIDs, chatRunEventScopeTraceEvent).
 		Order("message_id ASC, seq ASC, id ASC").
 		Find(&items).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	return toConversationMessageTraceEventDomains(items), nil
 }
@@ -1851,7 +1876,7 @@ func (r *Repo) CreateConversationToolCall(ctx context.Context, item *domainconve
 	}
 	entity := toConversationToolCallModel(item)
 	if err := r.db.WithContext(ctx).Create(&entity).Error; err != nil {
-		return translateError(err)
+		return dberror.Translate(err)
 	}
 	item.ID = entity.ID
 	item.CreatedAt = entity.CreatedAt
@@ -1868,7 +1893,7 @@ func (r *Repo) CreateConversationToolCalls(ctx context.Context, items []domainco
 		entities = append(entities, toConversationToolCallModel(&items[i]))
 	}
 	if err := r.db.WithContext(ctx).Create(&entities).Error; err != nil {
-		return translateError(err)
+		return dberror.Translate(err)
 	}
 	for index := range items {
 		if index < len(entities) {
@@ -1895,14 +1920,14 @@ func (r *Repo) ListConversationRuns(
 		Model(&models.ConversationRun{}).
 		Where("user_id = ? AND conversation_id = ?", userID, conversationID)
 	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, translateError(err)
+		return nil, 0, dberror.Translate(err)
 	}
 	if err := query.
 		Order("id DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&items).Error; err != nil {
-		return nil, 0, translateError(err)
+		return nil, 0, dberror.Translate(err)
 	}
 	return toConversationRunDomains(items), total, nil
 }
@@ -1953,7 +1978,7 @@ func (r *Repo) ListConversationEventLogs(
 		query = query.Where("created_at <= ?", *filter.CreatedTo)
 	}
 	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, translateError(err)
+		return nil, 0, dberror.Translate(err)
 	}
 	order := "created_at DESC, id DESC"
 	switch strings.TrimSpace(filter.Sort) {
@@ -1970,7 +1995,7 @@ func (r *Repo) ListConversationEventLogs(
 		Offset(offset).
 		Limit(limit).
 		Find(&items).Error; err != nil {
-		return nil, 0, translateError(err)
+		return nil, 0, dberror.Translate(err)
 	}
 	results := toConversationEventLogDomains(items)
 	if err := r.hydrateConversationEventRunMetadata(ctx, results); err != nil {
@@ -1986,7 +2011,7 @@ func (r *Repo) GetConversationEventLog(ctx context.Context, eventID uint) (*doma
 		Select(conversationEventDetailSelectColumns(r.db)).
 		Where("id = ?", eventID).
 		First(&item).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	results := toConversationEventLogDomains([]models.ChatRunEvent{item})
 	if err := r.hydrateConversationEventRunMetadata(ctx, results); err != nil {
@@ -1996,6 +2021,40 @@ func (r *Repo) GetConversationEventLog(ctx context.Context, eventID uint) (*doma
 		return nil, repository.ErrNotFound
 	}
 	return &results[0], nil
+}
+
+// GetConversationToolCallDetail 查询当前用户指定运行内的工具调用结果详情。
+func (r *Repo) GetConversationToolCallDetail(
+	ctx context.Context,
+	userID uint,
+	runID string,
+	toolCallID string,
+) (*domainconversation.ToolCallDetail, error) {
+	var item models.ChatRunEvent
+	if err := r.db.WithContext(ctx).
+		Select(conversationToolCallDetailSelectColumns(r.db)).
+		Where(
+			"user_id = ? AND run_id = ? AND event_scope = ? AND tool_call_id = ?",
+			userID,
+			runID,
+			chatRunEventScopeToolCall,
+			toolCallID,
+		).
+		Take(&item).Error; err != nil {
+		return nil, dberror.Translate(err)
+	}
+	return &domainconversation.ToolCallDetail{
+		RunID:           item.RunID,
+		ToolCallID:      item.ToolCallID,
+		ToolName:        item.ToolName,
+		Status:          item.Status,
+		OutputJSON:      item.OutputJSON,
+		OutputSizeBytes: item.OutputSizeBytes,
+		OutputOmitted:   item.OutputOmitted,
+		ErrorJSON:       item.ErrorJSON,
+		ErrorSizeBytes:  item.ErrorSizeBytes,
+		ErrorOmitted:    item.ErrorOmitted,
+	}, nil
 }
 
 func (r *Repo) hydrateConversationEventRunMetadata(ctx context.Context, results []domainconversation.EventLog) error {
@@ -2021,7 +2080,7 @@ func (r *Repo) hydrateConversationEventRunMetadata(ctx context.Context, results 
 		Select("run_id", "provider_protocol", "upstream_name", "platform_model_name", "routed_binding_code", "upstream_model_name").
 		Where("run_id IN ?", runIDs).
 		Find(&runs).Error; err != nil {
-		return translateError(err)
+		return dberror.Translate(err)
 	}
 	runsByID := make(map[string]models.ConversationRun, len(runs))
 	for _, run := range runs {
@@ -2056,7 +2115,7 @@ func (r *Repo) ListConversationRunsByRunIDs(
 		Where("user_id = ? AND conversation_id = ? AND run_id IN ?", userID, conversationID, runIDs).
 		Order("id ASC").
 		Find(&items).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	return toConversationRunDomains(items), nil
 }
@@ -2076,7 +2135,7 @@ func (r *Repo) ListConversationRunStatusesByRunIDs(
 		Where("user_id = ? AND run_id IN ?", userID, runIDs).
 		Order("id ASC").
 		Scan(&items).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	return items, nil
 }
@@ -2087,7 +2146,7 @@ func (r *Repo) GetMessageByID(ctx context.Context, conversationID uint, messageI
 	if err := r.db.WithContext(ctx).
 		Where("id = ? AND conversation_id = ?", messageID, conversationID).
 		First(&item).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	single := []models.Message{item}
 	if err := r.hydrateMessageRefs(ctx, single); err != nil {
@@ -2136,7 +2195,7 @@ ORDER BY _depth DESC`
 
 	path := make([]models.Message, 0)
 	if err := r.db.WithContext(ctx).Raw(cteSQL, leafMessageID, conversationID, maxDepth, conversationID).Scan(&path).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 
 	if err := r.hydrateMessageRefs(ctx, path); err != nil {
@@ -2211,7 +2270,7 @@ ORDER BY depth DESC`
 	if err := r.db.WithContext(ctx).
 		Raw(previewSQL, conversationID, conversationID, maxDepth, conversationID, limit).
 		Scan(&rows).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 
 	items := make([]domainconversation.Message, 0, len(rows))
@@ -2242,7 +2301,7 @@ func (r *Repo) ListRecentMessages(ctx context.Context, conversationID uint, limi
 		Model(&models.Message{}).
 		Where("conversation_id = ?", conversationID).
 		Count(&total).Error; err != nil {
-		return nil, 0, translateError(err)
+		return nil, 0, dberror.Translate(err)
 	}
 	offset := int(total) - limit
 	if offset < 0 {
@@ -2255,7 +2314,7 @@ func (r *Repo) ListRecentMessages(ctx context.Context, conversationID uint, limi
 		Offset(offset).
 		Limit(limit).
 		Find(&items).Error; err != nil {
-		return nil, 0, translateError(err)
+		return nil, 0, dberror.Translate(err)
 	}
 	if err := r.hydrateMessageRefs(ctx, items); err != nil {
 		return nil, 0, err
@@ -2270,7 +2329,7 @@ func (r *Repo) ListRecentMessages(ctx context.Context, conversationID uint, limi
 func (r *Repo) CreateContextSnapshot(ctx context.Context, item *domainconversation.ContextSnapshot) error {
 	entity := toContextSnapshotModel(item)
 	if err := r.db.WithContext(ctx).Create(&entity).Error; err != nil {
-		return translateError(err)
+		return dberror.Translate(err)
 	}
 	*item = toContextSnapshotDomain(entity)
 	return nil
@@ -2284,7 +2343,7 @@ func (r *Repo) GetContextSnapshotByRunID(ctx context.Context, runID string) (*do
 		Order("id DESC").
 		Limit(1).
 		First(&item).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	result := toContextSnapshotDomain(item)
 	return &result, nil
@@ -2298,7 +2357,7 @@ func (r *Repo) GetLatestContextSnapshot(ctx context.Context, conversationID uint
 		Order("id DESC").
 		Limit(1).
 		First(&item).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	result := toContextSnapshotDomain(item)
 	return &result, nil
@@ -2306,25 +2365,23 @@ func (r *Repo) GetLatestContextSnapshot(ctx context.Context, conversationID uint
 
 // ListFileObjectsByUser 分页查询用户文件。
 func (r *Repo) ListFileObjectsByUser(ctx context.Context, userID uint, offset int, limit int) ([]domainconversation.FileObject, int64, error) {
-	return r.ListFileObjectsByUserWithFilter(ctx, userID, offset, limit, "", "all", "created")
+	return r.ListFileObjectsByUserWithFilter(ctx, repository.ListFileObjectsInput{
+		UserID:     userID,
+		Offset:     offset,
+		Limit:      limit,
+		FilterKind: "all",
+		SortBy:     "created",
+	})
 }
 
-func (r *Repo) ListFileObjectsByUserWithFilter(
-	ctx context.Context,
-	userID uint,
-	offset int,
-	limit int,
-	searchQuery string,
-	filterKind string,
-	sortBy string,
-) ([]domainconversation.FileObject, int64, error) {
+func (r *Repo) ListFileObjectsByUserWithFilter(ctx context.Context, input repository.ListFileObjectsInput) ([]domainconversation.FileObject, int64, error) {
 	items := make([]models.FileObject, 0)
 	var total int64
 
 	query := r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
-		Where("user_id = ? AND status = ?", userID, "active")
-	normalizedQuery := strings.TrimSpace(searchQuery)
+		Where("user_id = ? AND status = ?", input.UserID, "active")
+	normalizedQuery := strings.TrimSpace(input.SearchQuery)
 	if normalizedQuery != "" {
 		pattern := "%" + strings.ToLower(normalizedQuery) + "%"
 		query = query.Where(
@@ -2336,14 +2393,14 @@ func (r *Repo) ListFileObjectsByUserWithFilter(
 			pattern,
 		)
 	}
-	if condition, args := buildFileKindWhereClause(filterKind); condition != "" {
+	if condition, args := buildFileKindWhereClause(input.FilterKind); condition != "" {
 		query = query.Where(condition, args...)
 	}
 	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, translateError(err)
+		return nil, 0, dberror.Translate(err)
 	}
 	orderQuery := query
-	switch sortBy {
+	switch input.SortBy {
 	case "name":
 		orderQuery = orderQuery.Order("file_name ASC").Order("id DESC")
 	case "size":
@@ -2354,10 +2411,10 @@ func (r *Repo) ListFileObjectsByUserWithFilter(
 		orderQuery = orderQuery.Order("created_at DESC").Order("id DESC")
 	}
 	if err := orderQuery.
-		Offset(offset).
-		Limit(limit).
+		Offset(input.Offset).
+		Limit(input.Limit).
 		Find(&items).Error; err != nil {
-		return nil, 0, translateError(err)
+		return nil, 0, dberror.Translate(err)
 	}
 	return toFileObjectDomains(items), total, nil
 }
@@ -2371,7 +2428,7 @@ func (r *Repo) GetActiveFileObjectsByIDs(ctx context.Context, userID uint, fileI
 	if err := r.db.WithContext(ctx).
 		Where("user_id = ? AND status = ? AND file_id IN ?", userID, "active", fileIDs).
 		Find(&items).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	return toFileObjectDomains(items), nil
 }
@@ -2392,7 +2449,7 @@ func (r *Repo) GetActiveFileProcessingStatusesByIDs(ctx context.Context, userID 
 		).
 		Where("user_id = ? AND status = ? AND file_id IN ?", userID, "active", fileIDs).
 		Find(&items).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	return toFileObjectDomains(items), nil
 }
@@ -2406,7 +2463,7 @@ func (r *Repo) GetActiveFileObjectByID(ctx context.Context, userID uint, fileID 
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, repository.ErrFileNotFound
 		}
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	result := toFileObjectDomain(item)
 	return &result, nil
@@ -2421,19 +2478,19 @@ func (r *Repo) RenameFileObjectByID(ctx context.Context, userID uint, fileID str
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, repository.ErrFileNotFound
 		}
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 
 	item.FileName = fileName
 	if err := r.db.WithContext(ctx).Save(&item).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	result := toFileObjectDomain(item)
 	return &result, nil
 }
 
-// UpdateFileObjectRagOptOut 更新文件 RAG 检索开关。
-func (r *Repo) UpdateFileObjectRagOptOut(ctx context.Context, userID uint, fileID string, ragOptOut bool) (*domainconversation.FileObject, error) {
+// UpdateFileObjectRAGOptOut 更新文件 RAG 检索开关。
+func (r *Repo) UpdateFileObjectRAGOptOut(ctx context.Context, userID uint, fileID string, ragOptOut bool) (*domainconversation.FileObject, error) {
 	var item models.FileObject
 	if err := r.db.WithContext(ctx).
 		Where("user_id = ? AND status = ? AND file_id = ?", userID, "active", fileID).
@@ -2441,11 +2498,11 @@ func (r *Repo) UpdateFileObjectRagOptOut(ctx context.Context, userID uint, fileI
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, repository.ErrFileNotFound
 		}
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
-	item.RagOptOut = ragOptOut
+	item.RAGOptOut = ragOptOut
 	if err := r.db.WithContext(ctx).Save(&item).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	result := toFileObjectDomain(item)
 	return &result, nil
@@ -2453,7 +2510,7 @@ func (r *Repo) UpdateFileObjectRagOptOut(ctx context.Context, userID uint, fileI
 
 // TouchFileObjectLastAccessedAt 更新文件最近使用时间。
 func (r *Repo) TouchFileObjectLastAccessedAt(ctx context.Context, userID uint, fileID string, accessedAt time.Time) error {
-	return translateError(r.db.WithContext(ctx).
+	return dberror.Translate(r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
 		Where("user_id = ? AND status = ? AND file_id = ?", userID, "active", fileID).
 		Update("last_accessed_at", accessedAt).Error)
@@ -2475,13 +2532,13 @@ func (r *Repo) GetLatestActiveFileObjectBySHA(
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	result := toFileObjectDomain(item)
 	return &result, nil
 }
 
-func buildFileKindWhereClause(filterKind string) (string, []interface{}) {
+func buildFileKindWhereClause(filterKind string) (string, []any) {
 	normalized := strings.ToLower(strings.TrimSpace(filterKind))
 	if normalized == "" || normalized == "all" {
 		return "", nil
@@ -2489,7 +2546,7 @@ func buildFileKindWhereClause(filterKind string) (string, []interface{}) {
 
 	parts := strings.Split(normalized, ",")
 	conditions := make([]string, 0, len(parts))
-	args := make([]interface{}, 0, len(parts)*8)
+	args := make([]any, 0, len(parts)*8)
 	seen := make(map[string]struct{}, len(parts))
 
 	for _, part := range parts {
@@ -2517,16 +2574,16 @@ func buildFileKindWhereClause(filterKind string) (string, []interface{}) {
 	return "(" + strings.Join(conditions, " OR ") + ")", args
 }
 
-func buildSingleFileKindWhereClause(filterKind string) (string, []interface{}) {
+func buildSingleFileKindWhereClause(filterKind string) (string, []any) {
 	switch filterKind {
 	case "image":
-		return "LOWER(mime_type) LIKE ?", []interface{}{"image/%"}
+		return "LOWER(mime_type) LIKE ?", []any{"image/%"}
 	case "audio":
-		return "LOWER(mime_type) LIKE ?", []interface{}{"audio/%"}
+		return "LOWER(mime_type) LIKE ?", []any{"audio/%"}
 	case "video":
-		return "LOWER(mime_type) LIKE ?", []interface{}{"video/%"}
+		return "LOWER(mime_type) LIKE ?", []any{"video/%"}
 	case "pdf":
-		return "(LOWER(mime_type) = ? OR LOWER(file_name) LIKE ?)", []interface{}{"application/pdf", "%.pdf"}
+		return "(LOWER(mime_type) = ? OR LOWER(file_name) LIKE ?)", []any{"application/pdf", "%.pdf"}
 	case "spreadsheet":
 		return "(" + strings.Join([]string{
 				"LOWER(mime_type) LIKE ?",
@@ -2536,7 +2593,7 @@ func buildSingleFileKindWhereClause(filterKind string) (string, []interface{}) {
 				"LOWER(file_name) LIKE ?",
 				"LOWER(file_name) LIKE ?",
 				"LOWER(file_name) LIKE ?",
-			}, " OR ") + ")", []interface{}{
+			}, " OR ") + ")", []any{
 				"%spreadsheet%",
 				"%excel%",
 				"%csv%",
@@ -2552,7 +2609,7 @@ func buildSingleFileKindWhereClause(filterKind string) (string, []interface{}) {
 				"LOWER(file_name) LIKE ?",
 				"LOWER(file_name) LIKE ?",
 				"LOWER(file_name) LIKE ?",
-			}, " OR ") + ")", []interface{}{
+			}, " OR ") + ")", []any{
 				"%presentation%",
 				"%powerpoint%",
 				"%.ppt",
@@ -2569,7 +2626,7 @@ func buildSingleFileKindWhereClause(filterKind string) (string, []interface{}) {
 				"LOWER(file_name) LIKE ?",
 				"LOWER(file_name) LIKE ?",
 				"LOWER(file_name) LIKE ?",
-			}, " OR ") + ")", []interface{}{
+			}, " OR ") + ")", []any{
 				"%word%",
 				"%rtf%",
 				"%opendocument.text%",
@@ -2607,7 +2664,7 @@ func buildSingleFileKindWhereClause(filterKind string) (string, []interface{}) {
 				"LOWER(file_name) LIKE ?",
 				"LOWER(file_name) LIKE ?",
 				"LOWER(file_name) LIKE ?",
-			}, " OR ") + ")", []interface{}{
+			}, " OR ") + ")", []any{
 				"text/%",
 				"%json%",
 				"%javascript%",
@@ -2652,7 +2709,7 @@ func (r *Repo) CreateFileObjectAndConsumeQuota(
 		entity := toFileObjectModel(item)
 		quota, err := getOrInitQuotaForUpdate(tx, entity.UserID, defaultQuotaBytes)
 		if err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 
 		nextUsed := quota.UsedBytes + entity.SizeBytes
@@ -2661,23 +2718,23 @@ func (r *Repo) CreateFileObjectAndConsumeQuota(
 		}
 
 		if err = tx.Create(&entity).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		*item = toFileObjectDomain(entity)
 
 		if err = tx.Model(&models.UserStorageQuota{}).
 			Where("id = ?", quota.ID).
 			Update("used_bytes", gorm.Expr("used_bytes + ?", entity.SizeBytes)).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 
 		if err = tx.Where("id = ?", quota.ID).First(&updatedQuota).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 
 	result := toStorageQuotaDomain(updatedQuota)
@@ -2703,7 +2760,7 @@ func (r *Repo) DeleteFileObjectAndReleaseQuota(
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return repository.ErrFileNotFound
 			}
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 
 		if options.RequireUnreferenced {
@@ -2720,15 +2777,15 @@ func (r *Repo) DeleteFileObjectAndReleaseQuota(
 
 		quota, err := getOrInitQuotaForUpdate(tx, userID, defaultQuotaBytes)
 		if err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 
 		if err = tx.Model(&models.FileObject{}).
 			Where("id = ?", deletedFile.ID).
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"status": "deleted",
 			}).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 
 		var remainingUserRefs int64
@@ -2740,7 +2797,7 @@ func (r *Repo) DeleteFileObjectAndReleaseQuota(
 				deletedFile.ID,
 			).
 			Count(&remainingUserRefs).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 
 		if remainingUserRefs == 0 {
@@ -2752,7 +2809,7 @@ func (r *Repo) DeleteFileObjectAndReleaseQuota(
 					"CASE WHEN used_bytes >= ? THEN used_bytes - ? ELSE 0 END",
 					deletedFile.SizeBytes, deletedFile.SizeBytes,
 				)).Error; err != nil {
-				return translateError(err)
+				return dberror.Translate(err)
 			}
 		}
 
@@ -2760,17 +2817,17 @@ func (r *Repo) DeleteFileObjectAndReleaseQuota(
 		if err = tx.Model(&models.FileObject{}).
 			Where("status = ? AND storage_path = ? AND id <> ?", "active", deletedFile.StoragePath, deletedFile.ID).
 			Count(&remainingPhysicalRefs).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		shouldRemovePhysical = remainingPhysicalRefs == 0
 
 		if err = tx.Where("id = ?", quota.ID).First(&updatedQuota).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, nil, false, translateError(err)
+		return nil, nil, false, dberror.Translate(err)
 	}
 
 	deleted := toFileObjectDomain(deletedFile)
@@ -2794,7 +2851,7 @@ func (r *Repo) GetOrInitUserStorageQuota(
 		return nil
 	})
 	if err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	result := toStorageQuotaDomain(quota)
 	return &result, nil
@@ -2820,7 +2877,7 @@ func getOrInitQuotaForUpdate(tx *gorm.DB, userID uint, defaultQuotaBytes int64) 
 			ReservedBytes: 0,
 		}
 		if err := tx.Select("UserID", "QuotaBytes", "UsedBytes", "ReservedBytes").Create(&quota).Error; err != nil {
-			return nil, translateError(err)
+			return nil, dberror.Translate(err)
 		}
 	} else {
 		if defaultQuotaBytes < 0 {
@@ -2830,7 +2887,7 @@ func getOrInitQuotaForUpdate(tx *gorm.DB, userID uint, defaultQuotaBytes int64) 
 			if err := tx.Model(&models.UserStorageQuota{}).
 				Where("id = ?", quota.ID).
 				Update("quota_bytes", defaultQuotaBytes).Error; err != nil {
-				return nil, translateError(err)
+				return nil, dberror.Translate(err)
 			}
 			quota.QuotaBytes = defaultQuotaBytes
 		}
@@ -2850,12 +2907,12 @@ func (r *Repo) QueueFileEmbedding(ctx context.Context, userID uint, fileID strin
 		Model(&models.FileObject{}).
 		Where("user_id = ? AND file_id = ? AND status = ?", userID, fileID, "active").
 		Where("NOT (embed_signature = ? AND embed_status IN ?)", embeddingSignature, []string{"queued", "processing", "ready"}).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"embed_status":    "queued",
 			"embed_signature": embeddingSignature,
 			"embed_error":     "",
 		})
-	return result.RowsAffected > 0, translateError(result.Error)
+	return result.RowsAffected > 0, dberror.Translate(result.Error)
 }
 
 // ClaimFileEmbedding 原子领取指定向量空间的文件任务。
@@ -2870,12 +2927,12 @@ func (r *Repo) ClaimFileEmbedding(ctx context.Context, userID uint, fileID strin
 		Model(&models.FileObject{}).
 		Where("user_id = ? AND file_id = ? AND status = ?", userID, fileID, "active").
 		Where("NOT (embed_signature = ? AND embed_status IN ?)", embeddingSignature, []string{"processing", "ready"}).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"embed_status":    "processing",
 			"embed_signature": embeddingSignature,
 			"embed_error":     "",
 		})
-	return result.RowsAffected > 0, translateError(result.Error)
+	return result.RowsAffected > 0, dberror.Translate(result.Error)
 }
 
 // UpdateFileObjectEmbedStatus 仅更新仍属于指定向量空间任务的文件状态。
@@ -2883,11 +2940,11 @@ func (r *Repo) UpdateFileObjectEmbedStatus(ctx context.Context, userID uint, fil
 	result := r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
 		Where("user_id = ? AND file_id = ? AND status = ? AND embed_signature = ?", userID, fileID, "active", strings.TrimSpace(embeddingSignature)).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"embed_status": status,
 			"embed_error":  embedErr,
 		})
-	return result.RowsAffected > 0, translateError(result.Error)
+	return result.RowsAffected > 0, dberror.Translate(result.Error)
 }
 
 // UpdateFileObjectChunkCount 在 embedding 完成后更新分片数量。
@@ -2896,7 +2953,7 @@ func (r *Repo) UpdateFileObjectChunkCount(ctx context.Context, fileObjID uint, e
 		Model(&models.FileObject{}).
 		Where("id = ? AND status = ? AND embed_signature = ?", fileObjID, "active", strings.TrimSpace(embeddingSignature)).
 		Update("chunk_count", chunkCount)
-	return result.RowsAffected > 0, translateError(result.Error)
+	return result.RowsAffected > 0, dberror.Translate(result.Error)
 }
 
 // CloneFileEmbeddingArtifacts 复用已完成 embedding 的文件分片到新的逻辑别名文件。
@@ -2910,7 +2967,7 @@ func (r *Repo) CloneFileEmbeddingArtifacts(ctx context.Context, source *domainco
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&models.FileObject{}).
 			Where("id = ?", targetEntity.ID).
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"embed_status":    "ready",
 				"embed_signature": sourceEntity.EmbedSignature,
 				"embed_error":     "",
@@ -2918,7 +2975,7 @@ func (r *Repo) CloneFileEmbeddingArtifacts(ctx context.Context, source *domainco
 				"chunk_count":     sourceEntity.ChunkCount,
 				"extracted_at":    sourceEntity.ExtractedAt,
 			}).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		if r.sqliteDialect() {
 			if err := deleteSQLiteFileChunkVectorsByFile(tx, targetEntity.ID); err != nil {
@@ -2926,7 +2983,7 @@ func (r *Repo) CloneFileEmbeddingArtifacts(ctx context.Context, source *domainco
 			}
 		}
 		if err := tx.Where("file_obj_id = ?", targetEntity.ID).Delete(&models.FileChunk{}).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		if r.sqliteDialect() {
 			if err := tx.Exec(
@@ -2938,7 +2995,7 @@ func (r *Repo) CloneFileEmbeddingArtifacts(ctx context.Context, source *domainco
 				targetEntity.UserID,
 				sourceEntity.ID,
 			).Error; err != nil {
-				return translateError(err)
+				return dberror.Translate(err)
 			}
 			result := tx.Exec(
 				fmt.Sprintf(`INSERT INTO %s (chunk_id, user_id, file_obj_id, embedding_signature, embedding)
@@ -2959,7 +3016,7 @@ func (r *Repo) CloneFileEmbeddingArtifacts(ctx context.Context, source *domainco
 				sourceEntity.ID,
 			)
 			if err := result.Error; err != nil {
-				return translateError(err)
+				return dberror.Translate(err)
 			}
 			if sourceEntity.ChunkCount > 0 && result.RowsAffected != int64(sourceEntity.ChunkCount) {
 				return fmt.Errorf("sqlite file vector copy mismatch: source_chunks=%d copied_vectors=%d", sourceEntity.ChunkCount, result.RowsAffected)
@@ -2999,7 +3056,7 @@ func (r *Repo) ReplaceFileChunks(ctx context.Context, fileObjID uint, embeddingS
 			return nil
 		}
 		if claim.Error != nil {
-			return translateError(claim.Error)
+			return dberror.Translate(claim.Error)
 		}
 		entities := make([]models.FileChunk, 0, len(chunks))
 		for i := range chunks {
@@ -3015,7 +3072,7 @@ func (r *Repo) ReplaceFileChunks(ctx context.Context, fileObjID uint, embeddingS
 		}
 		// 删除旧分片
 		if err := tx.Where("file_obj_id = ?", fileObjID).Delete(&models.FileChunk{}).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		if len(entities) == 0 {
 			published = true
@@ -3023,7 +3080,7 @@ func (r *Repo) ReplaceFileChunks(ctx context.Context, fileObjID uint, embeddingS
 		}
 		// 插入新分片
 		if err := tx.Create(&entities).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		if r.sqliteDialect() {
 			if err := insertSQLiteFileChunkVectors(tx, entities, embeddings); err != nil {
@@ -3045,7 +3102,7 @@ func (r *Repo) ReplaceFileChunks(ctx context.Context, fileObjID uint, embeddingS
 				`UPDATE "file_chunks" SET embedding = ? WHERE id = ?`,
 				vec, chunk.ID,
 			).Error; err != nil {
-				return translateError(err)
+				return dberror.Translate(err)
 			}
 		}
 		published = true
@@ -3065,7 +3122,7 @@ func (r *Repo) GetFirstActiveUpstream(ctx context.Context) (*models.LLMUpstream,
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	return &item, nil
 }
@@ -3079,7 +3136,7 @@ func (r *Repo) GetUpstreamByID(ctx context.Context, upstreamID uint) (*models.LL
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	return &item, nil
 }
@@ -3087,11 +3144,354 @@ func (r *Repo) GetUpstreamByID(ctx context.Context, upstreamID uint) (*models.LL
 
 
 
+func deleteSQLiteFileChunkVectorsByFile(tx *gorm.DB, fileObjID uint) error {
+	return dberror.Translate(tx.Exec(
+		fmt.Sprintf(`DELETE FROM %s WHERE chunk_id IN (
+			SELECT id FROM "file_chunks" WHERE file_obj_id = ?
+		)`, sqlitevec.FileChunkVectorTable),
+		fileObjID,
+	).Error)
+}
 
+func insertSQLiteFileChunkVectors(tx *gorm.DB, entities []models.FileChunk, embeddings [][]float32) error {
+	if len(entities) != len(embeddings) {
+		return fmt.Errorf("embedding count mismatch: chunks=%d embeddings=%d", len(entities), len(embeddings))
+	}
+	for i, chunk := range entities {
+		if len(embeddings[i]) == 0 {
+			return fmt.Errorf("empty embedding vector at chunk %d", i)
+		}
+		vector, err := sqlitevec.SerializeFloat32(embeddings[i])
+		if err != nil {
+			return err
+		}
+		if err = tx.Exec(
+			fmt.Sprintf(`INSERT INTO %s (chunk_id, user_id, file_obj_id, embedding_signature, embedding) VALUES (?, ?, ?, ?, ?)`, sqlitevec.FileChunkVectorTable),
+			chunk.ID,
+			chunk.UserID,
+			chunk.FileObjID,
+			chunk.EmbeddingSignature,
+			vector,
+		).Error; err != nil {
+			return dberror.Translate(err)
+		}
+	}
+	return nil
+}
 
+func (r *Repo) searchSQLiteFileChunks(ctx context.Context, userID uint, fileObjIDs []uint, queryEmbedding []float32, embeddingSignature string, topK int) ([]domainconversation.FileChunkSearchResult, error) {
+	vector, err := sqlitevec.SerializeFloat32(queryEmbedding)
+	if err != nil {
+		return nil, err
+	}
+	uniqueFileObjIDs := make([]uint, 0, len(fileObjIDs))
+	seenFileObjIDs := make(map[uint]struct{}, len(fileObjIDs))
+	for _, fileObjID := range fileObjIDs {
+		if fileObjID == 0 {
+			continue
+		}
+		if _, exists := seenFileObjIDs[fileObjID]; exists {
+			continue
+		}
+		seenFileObjIDs[fileObjID] = struct{}{}
+		uniqueFileObjIDs = append(uniqueFileObjIDs, fileObjID)
+	}
+	if len(uniqueFileObjIDs) == 0 {
+		return nil, nil
+	}
+	// sqlite-vec applies k before the outer JOIN predicates. Resolve the allowed
+	// file IDs first so unauthorized nearest neighbours cannot displace valid
+	// candidates from the virtual-table result window.
+	authorizedFileObjIDs := make([]uint, 0, len(uniqueFileObjIDs))
+	if err := r.db.WithContext(ctx).Table("file_chunks").
+		Distinct("file_chunks.file_obj_id").
+		Where("file_chunks.file_obj_id IN ?", uniqueFileObjIDs).
+		Where(`
+			file_chunks.user_id = ?
+			OR EXISTS (
+				SELECT 1
+				FROM knowledge_base_files AS kbf
+				JOIN knowledge_bases AS kb ON kb.id = kbf.knowledge_base_id
+				WHERE kbf.file_object_id = file_chunks.file_obj_id
+					AND kb.scope = ?
+					AND kb.enabled = ?
+			)`, userID, domainknowledgebase.ScopeBuiltin, true).
+		Pluck("file_chunks.file_obj_id", &authorizedFileObjIDs).Error; err != nil {
+		return nil, dberror.Translate(err)
+	}
+	if len(authorizedFileObjIDs) == 0 {
+		return nil, nil
+	}
+	var rows []fileChunkSearchRow
+	query := fmt.Sprintf(`
+		SELECT chunks.id, chunks.file_obj_id, chunks.user_id, chunks.chunk_index, chunks.page_num,
+		       chunks.char_offset, chunks.content, chunks.token_count, chunks.created_at,
+		       (1.0 - vectors.distance) AS similarity
+		FROM %s AS vectors
+		JOIN "file_chunks" AS chunks
+			ON chunks.id = vectors.chunk_id
+		WHERE vectors.embedding MATCH ?
+			AND vectors.k = ?
+			AND vectors.file_obj_id IN ?
+			AND vectors.embedding_signature = ?
+			AND chunks.embedding_signature = ?
+			AND (
+				chunks.user_id = ?
+				OR EXISTS (
+					SELECT 1
+					FROM knowledge_base_files AS kbf
+					JOIN knowledge_bases AS kb ON kb.id = kbf.knowledge_base_id
+					WHERE kbf.file_object_id = chunks.file_obj_id
+						AND kb.scope = ?
+						AND kb.enabled = ?
+				)
+			)
+		ORDER BY vectors.distance ASC`,
+		sqlitevec.FileChunkVectorTable,
+	)
+	if err := r.db.WithContext(ctx).Raw(
+		query,
+		vector,
+		topK,
+		authorizedFileObjIDs,
+		embeddingSignature,
+		embeddingSignature,
+		userID,
+		domainknowledgebase.ScopeBuiltin,
+		true,
+	).Scan(&rows).Error; err != nil {
+		return nil, dberror.Translate(err)
+	}
+	results := make([]domainconversation.FileChunkSearchResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, domainconversation.FileChunkSearchResult{
+			FileChunk: domainconversation.FileChunk{
+				ID:         row.ID,
+				FileObjID:  row.FileObjID,
+				UserID:     row.UserID,
+				ChunkIndex: row.ChunkIndex,
+				PageNum:    row.PageNum,
+				CharOffset: row.CharOffset,
+				Content:    row.Content,
+				TokenCount: row.TokenCount,
+				CreatedAt:  row.CreatedAt,
+			},
+			Similarity: row.Similarity,
+		})
+	}
+	return results, nil
+}
 
+// SearchFileChunks 使用向量存储的余弦距离检索最相关的文本分片。
+// 返回结果按相似度降序排列，已携带 Similarity 分数以供阈值过滤。
+func (r *Repo) SearchFileChunks(ctx context.Context, userID uint, fileObjIDs []uint, queryEmbedding []float32, embeddingSignature string, topK int) ([]domainconversation.FileChunkSearchResult, error) {
+	if userID == 0 || len(fileObjIDs) == 0 || len(queryEmbedding) == 0 || strings.TrimSpace(embeddingSignature) == "" {
+		return nil, nil
+	}
+	if topK <= 0 {
+		topK = 5
+	}
+	if r.sqliteDialect() {
+		return r.searchSQLiteFileChunks(ctx, userID, fileObjIDs, queryEmbedding, embeddingSignature, topK)
+	}
+	vec, err := float32SliceToPostgresQueryVector(queryEmbedding)
+	if err != nil {
+		return nil, err
+	}
+	candidateLimit := vectorutil.CandidateLimit(topK)
+	indexExpression := vectorutil.PostgresIndexExpression("source_chunks.embedding")
+	exactExpression := vectorutil.PostgresPaddedExpression("chunks.embedding")
+	query := fmt.Sprintf(`
+		WITH vector_candidates AS MATERIALIZED (
+			SELECT source_chunks.id
+			FROM file_chunks AS source_chunks
+			WHERE source_chunks.file_obj_id IN ?
+				AND source_chunks.embedding_signature = ?
+				AND source_chunks.embedding IS NOT NULL
+				AND (
+					source_chunks.user_id = ?
+					OR EXISTS (
+						SELECT 1
+						FROM knowledge_base_files AS kbf
+						JOIN knowledge_bases AS kb ON kb.id = kbf.knowledge_base_id
+						WHERE kbf.file_object_id = source_chunks.file_obj_id
+							AND kb.scope = ?
+							AND kb.enabled = ?
+					)
+				)
+			ORDER BY %s
+				<=> subvector(?::vector, 1, %d)::halfvec(%d)
+			LIMIT ?
+		)
+		SELECT chunks.id, chunks.file_obj_id, chunks.user_id, chunks.chunk_index, chunks.page_num,
+		       chunks.char_offset, chunks.content, chunks.token_count, chunks.created_at,
+		       (1 - (%s <=> ?::vector(%d))) AS similarity
+		FROM file_chunks AS chunks
+		JOIN vector_candidates AS candidates ON candidates.id = chunks.id
+		ORDER BY similarity DESC
+		LIMIT ?`,
+		indexExpression,
+		vectorutil.IndexDimensions,
+		vectorutil.IndexDimensions,
+		exactExpression,
+		vectorutil.MaxDimensions,
+	)
+	var rows []fileChunkSearchRow
+	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := vectorutil.ConfigurePostgresCandidateSearch(tx); err != nil {
+			return err
+		}
+		return tx.Raw(
+			query,
+			fileObjIDs,
+			embeddingSignature,
+			userID,
+			domainknowledgebase.ScopeBuiltin,
+			true,
+			vec,
+			candidateLimit,
+			vec,
+			topK,
+		).Scan(&rows).Error
+	}); err != nil {
+		return nil, dberror.Translate(err)
+	}
+	results := make([]domainconversation.FileChunkSearchResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, domainconversation.FileChunkSearchResult{
+			FileChunk: domainconversation.FileChunk{
+				ID:         row.ID,
+				FileObjID:  row.FileObjID,
+				UserID:     row.UserID,
+				ChunkIndex: row.ChunkIndex,
+				PageNum:    row.PageNum,
+				CharOffset: row.CharOffset,
+				Content:    row.Content,
+				TokenCount: row.TokenCount,
+				CreatedAt:  row.CreatedAt,
+			},
+			Similarity: row.Similarity,
+		})
+	}
+	return results, nil
+}
 
+// BM25SearchFileChunks 使用 PostgreSQL tsvector 全文检索文件分片，中文字符以空格切字作为后备分词策略。
+// 返回结果按 ts_rank 降序，Similarity 字段存放归一化后的排名得分（0-1）。
+func (r *Repo) BM25SearchFileChunks(ctx context.Context, userID uint, fileObjIDs []uint, query string, topK int) ([]domainconversation.FileChunkSearchResult, error) {
+	if userID == 0 || len(fileObjIDs) == 0 || strings.TrimSpace(query) == "" {
+		return nil, nil
+	}
+	if topK <= 0 {
+		topK = 5
+	}
+	if r.sqliteDialect() {
+		return r.keywordSearchFileChunks(ctx, userID, fileObjIDs, query, topK)
+	}
+	// 中文字符逐字切开，空格分隔后拼成 OR 查询，提高中文召回率
+	tsQuery := buildTSQuery(query)
+	if tsQuery == "" {
+		return nil, nil
+	}
+	rawQuery := `
+		SELECT id, file_obj_id, user_id, chunk_index, page_num, char_offset, content, token_count, created_at,
+		       ts_rank(to_tsvector('simple', content), to_tsquery('simple', ?)) AS similarity
+		FROM file_chunks
+		WHERE file_obj_id IN ?
+		  AND (
+			  file_chunks.user_id = ?
+			  OR EXISTS (
+				  SELECT 1
+				  FROM knowledge_base_files AS kbf
+				  JOIN knowledge_bases AS kb ON kb.id = kbf.knowledge_base_id
+				  WHERE kbf.file_object_id = file_chunks.file_obj_id
+					AND kb.scope = ?
+					AND kb.enabled = ?
+			  )
+		  )
+		  AND to_tsvector('simple', content) @@ to_tsquery('simple', ?)
+		ORDER BY similarity DESC
+		LIMIT ?`
+	var rows []fileChunkSearchRow
+	if err := r.db.WithContext(ctx).Raw(
+		rawQuery,
+		tsQuery,
+		fileObjIDs,
+		userID,
+		domainknowledgebase.ScopeBuiltin,
+		true,
+		tsQuery,
+		topK,
+	).Scan(&rows).Error; err != nil {
+		return nil, dberror.Translate(err)
+	}
+	results := make([]domainconversation.FileChunkSearchResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, domainconversation.FileChunkSearchResult{
+			FileChunk: domainconversation.FileChunk{
+				ID:         row.ID,
+				FileObjID:  row.FileObjID,
+				UserID:     row.UserID,
+				ChunkIndex: row.ChunkIndex,
+				PageNum:    row.PageNum,
+				CharOffset: row.CharOffset,
+				Content:    row.Content,
+				TokenCount: row.TokenCount,
+				CreatedAt:  row.CreatedAt,
+			},
+			Similarity: row.Similarity,
+		})
+	}
+	return results, nil
+}
 
+func (r *Repo) keywordSearchFileChunks(ctx context.Context, userID uint, fileObjIDs []uint, query string, topK int) ([]domainconversation.FileChunkSearchResult, error) {
+	terms := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
+	if len(terms) == 0 {
+		terms = []string{strings.ToLower(strings.TrimSpace(query))}
+	}
+	dbq := r.db.WithContext(ctx).
+		Model(&models.FileChunk{}).
+		Where("file_obj_id IN ?", fileObjIDs).
+		Where(`
+			file_chunks.user_id = ?
+			OR EXISTS (
+				SELECT 1
+				FROM knowledge_base_files AS kbf
+				JOIN knowledge_bases AS kb ON kb.id = kbf.knowledge_base_id
+				WHERE kbf.file_object_id = file_chunks.file_obj_id
+					AND kb.scope = ?
+					AND kb.enabled = ?
+			)`, userID, domainknowledgebase.ScopeBuiltin, true)
+	for _, term := range terms {
+		if strings.TrimSpace(term) == "" {
+			continue
+		}
+		dbq = dbq.Where("LOWER(content) LIKE ?", "%"+term+"%")
+	}
+	rows := make([]models.FileChunk, 0, topK)
+	if err := dbq.Order("id ASC").Limit(topK).Find(&rows).Error; err != nil {
+		return nil, dberror.Translate(err)
+	}
+	results := make([]domainconversation.FileChunkSearchResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, domainconversation.FileChunkSearchResult{
+			FileChunk: domainconversation.FileChunk{
+				ID:         row.ID,
+				FileObjID:  row.FileObjID,
+				UserID:     row.UserID,
+				ChunkIndex: row.ChunkIndex,
+				PageNum:    row.PageNum,
+				CharOffset: row.CharOffset,
+				Content:    row.Content,
+				TokenCount: row.TokenCount,
+				CreatedAt:  row.CreatedAt,
+			},
+			Similarity: 0.5,
+		})
+	}
+	return results, nil
+}
 
 
 // GetUserSettingValue 查询指定用户的单个配置值，不存在时返回 ""。
@@ -3104,7 +3504,7 @@ func (r *Repo) GetUserSettingValue(ctx context.Context, userID uint, key string)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", nil
 		}
-		return "", translateError(err)
+		return "", dberror.Translate(err)
 	}
 	return item.Value, nil
 }
@@ -3122,7 +3522,7 @@ func (r *Repo) GetUserSettingValues(ctx context.Context, userID uint, keys []str
 	if err := r.db.WithContext(ctx).
 		Where("user_id = ? AND key IN ?", userID, keys).
 		Find(&items).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	for _, item := range items {
 		values[item.Key] = item.Value
@@ -3130,6 +3530,19 @@ func (r *Repo) GetUserSettingValues(ctx context.Context, userID uint, keys []str
 	return values, nil
 }
 
+// GetFileObjectsByInternalIDs 按内部主键 ID 批量查询文件对象。
+func (r *Repo) GetFileObjectsByInternalIDs(ctx context.Context, userID uint, ids []uint) ([]domainconversation.FileObject, error) {
+	items := make([]models.FileObject, 0)
+	if len(ids) == 0 {
+		return []domainconversation.FileObject{}, nil
+	}
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND id IN ?", userID, ids).
+		Find(&items).Error; err != nil {
+		return nil, dberror.Translate(err)
+	}
+	return toFileObjectDomains(items), nil
+}
 
 func (r *Repo) hydrateMessageRefs(ctx context.Context, items []models.Message) error {
 	if len(items) == 0 {
@@ -3165,7 +3578,7 @@ func (r *Repo) hydrateMessageRefs(ctx context.Context, items []models.Message) e
 			Select("id", "public_id").
 			Where("id IN ?", ids).
 			Find(&refs).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		for i := range refs {
 			publicIDs[refs[i].ID] = refs[i].PublicID
@@ -3246,12 +3659,12 @@ func (r *Repo) hydrateMessageAttachments(ctx context.Context, items []models.Mes
 		Where("a.message_id IN ? AND a.status <> ?", messageIDs, "deleted").
 		Order("a.id ASC").
 		Scan(&rows).Error; err != nil {
-		return translateError(err)
+		return dberror.Translate(err)
 	}
 
-	grouped := make(map[uint][]map[string]interface{}, len(rows))
+	grouped := make(map[uint][]map[string]any, len(rows))
 	for _, row := range rows {
-		payload := map[string]interface{}{
+		payload := map[string]any{
 			"file_id":                  row.FileID,
 			"kind":                     row.Kind,
 			"file_name":                row.FileName,
@@ -3607,8 +4020,14 @@ func toConversationEventLogDomains(items []models.ChatRunEvent) []domainconversa
 			ToolName:         item.ToolName,
 			LatencyMS:        item.LatencyMS,
 			InputJSON:        item.InputJSON,
+			InputSizeBytes:   item.InputSizeBytes,
+			InputOmitted:     item.InputOmitted,
 			OutputJSON:       item.OutputJSON,
+			OutputSizeBytes:  item.OutputSizeBytes,
+			OutputOmitted:    item.OutputOmitted,
 			ErrorJSON:        item.ErrorJSON,
+			ErrorSizeBytes:   item.ErrorSizeBytes,
+			ErrorOmitted:     item.ErrorOmitted,
 			StartedAt:        item.StartedAt,
 			EndedAt:          item.EndedAt,
 			CreatedAt:        item.CreatedAt,
@@ -3953,7 +4372,7 @@ func toFileObjectDomain(item models.FileObject) domainconversation.FileObject {
 		ProcessingPayloadJSON:  item.ProcessingPayloadJSON,
 		ProcessingStartedAt:    item.ProcessingStartedAt,
 		ProcessingCompletedAt:  item.ProcessingCompletedAt,
-		RagOptOut:              item.RagOptOut,
+		RAGOptOut:              item.RAGOptOut,
 		CreatedAt:              item.CreatedAt,
 		UpdatedAt:              item.UpdatedAt,
 	}
@@ -4009,7 +4428,7 @@ func toFileObjectModel(item *domainconversation.FileObject) models.FileObject {
 		ProcessingPayloadJSON:  item.ProcessingPayloadJSON,
 		ProcessingStartedAt:    item.ProcessingStartedAt,
 		ProcessingCompletedAt:  item.ProcessingCompletedAt,
-		RagOptOut:              item.RagOptOut,
+		RAGOptOut:              item.RAGOptOut,
 	}
 }
 
@@ -4073,11 +4492,11 @@ func toFileObjectProcessingStateDomain(item models.FileObject) domainconversatio
 	}
 }
 
-func fileObjectProcessingStateUpdates(item *domainconversation.FileObjectProcessing) map[string]interface{} {
+func fileObjectProcessingStateUpdates(item *domainconversation.FileObjectProcessing) map[string]any {
 	if item == nil {
-		return map[string]interface{}{}
+		return map[string]any{}
 	}
-	return map[string]interface{}{
+	return map[string]any{
 		"detected_mime":            item.DetectedMIME,
 		"file_category":            item.FileCategory,
 		"processing_status":        item.ProcessingStatus,
@@ -4151,7 +4570,7 @@ func (r *Repo) VectorStoreAvailable(ctx context.Context) (bool, error) {
 	for _, check := range checks {
 		available := false
 		if err := r.db.WithContext(ctx).Raw(check.query, check.args...).Scan(&available).Error; err != nil {
-			return false, translateError(err)
+			return false, dberror.Translate(err)
 		}
 		if !available {
 			return false, nil
@@ -4181,7 +4600,7 @@ func (r *Repo) UpsertMessageChunks(ctx context.Context, chunks []domainconversat
 			}
 		}
 		if err := tx.Where("message_id IN ?", messageIDs).Delete(&models.MessageChunk{}).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		// 插入新分片
 		entities := make([]models.MessageChunk, 0, len(chunks))
@@ -4198,7 +4617,7 @@ func (r *Repo) UpsertMessageChunks(ctx context.Context, chunks []domainconversat
 			})
 		}
 		if err := tx.Create(&entities).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 		if r.sqliteDialect() {
 			return insertSQLiteMessageChunkVectors(tx, entities, embeddings)
@@ -4213,7 +4632,7 @@ func (r *Repo) UpsertMessageChunks(ctx context.Context, chunks []domainconversat
 				return err
 			}
 			if err := tx.Exec(`UPDATE "chat_message_chunks" SET embedding = ? WHERE id = ?`, vec, entity.ID).Error; err != nil {
-				return translateError(err)
+				return dberror.Translate(err)
 			}
 		}
 		return nil
@@ -4237,7 +4656,7 @@ func deleteSQLiteMessageChunkVectorsByMessages(tx *gorm.DB, messageIDs []uint) e
 	if len(messageIDs) == 0 {
 		return nil
 	}
-	return translateError(tx.Exec(
+	return dberror.Translate(tx.Exec(
 		fmt.Sprintf(`DELETE FROM %s WHERE chunk_id IN (
 			SELECT id FROM "chat_message_chunks" WHERE message_id IN ?
 		)`, sqlitevec.MessageChunkVectorTable),
@@ -4263,7 +4682,7 @@ func insertSQLiteMessageChunkVectors(tx *gorm.DB, entities []models.MessageChunk
 			chunk.EmbeddingSignature,
 			vector,
 		).Error; err != nil {
-			return translateError(err)
+			return dberror.Translate(err)
 		}
 	}
 	return nil
@@ -4305,7 +4724,7 @@ func (r *Repo) searchSQLiteMessageChunks(ctx context.Context, input repository.M
 	)
 	var rows []messageChunkSearchRow
 	if err := r.db.WithContext(ctx).Raw(query, args...).Scan(&rows).Error; err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	results := make([]domainconversation.MessageChunk, 0, len(rows))
 	for _, row := range rows {
@@ -4387,7 +4806,7 @@ func (r *Repo) SearchMessageChunks(ctx context.Context, input repository.Message
 		}
 		return tx.Raw(query, args...).Scan(&rows).Error
 	}); err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	results := make([]domainconversation.MessageChunk, 0, len(rows))
 	for _, row := range rows {
@@ -4424,11 +4843,11 @@ func (r *Repo) MarkEmbeddedFilesStale(ctx context.Context, activeSignature strin
 			WHERE file_chunks.file_obj_id = file_objects.id
 				AND file_chunks.embedding_signature = ?
 		)`, activeSignature).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"embed_status": "stale",
 			"embed_error":  "embedding configuration changed, reindex required",
 		})
-	return result.RowsAffected, translateError(result.Error)
+	return result.RowsAffected, dberror.Translate(result.Error)
 }
 
 // CountFilesByEmbedStatus 统计指定 embed_status 的文件数量。
@@ -4438,7 +4857,7 @@ func (r *Repo) CountFilesByEmbedStatus(ctx context.Context, status string) (int6
 		Model(&models.FileObject{}).
 		Where("embed_status = ? AND status = ?", status, "active").
 		Count(&count).Error
-	return count, translateError(err)
+	return count, dberror.Translate(err)
 }
 
 // MarkTimedOutFileEmbeddingsFailed 将长时间停留在向量化中的文件标记为失败。
@@ -4449,7 +4868,7 @@ func (r *Repo) MarkTimedOutFileEmbeddingsFailed(ctx context.Context, userID uint
 	result := r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
 		Where("user_id = ? AND status = ? AND embed_status = ? AND updated_at < ?", userID, "active", "processing", cutoff).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"embed_status":             "failed",
 			"embed_error":              truncateText(message, 255),
 			"processing_status":        gorm.Expr("CASE WHEN processing_status = ? THEN ? ELSE processing_status END", "embedding", "ready"),
@@ -4457,7 +4876,7 @@ func (r *Repo) MarkTimedOutFileEmbeddingsFailed(ctx context.Context, userID uint
 			"processing_error_code":    gorm.Expr("CASE WHEN processing_status = ? THEN ? ELSE processing_error_code END", "embedding", "embed_failed"),
 			"processing_error_message": gorm.Expr("CASE WHEN processing_status = ? THEN ? ELSE processing_error_message END", "embedding", truncateText(message, 255)),
 		})
-	return result.RowsAffected, translateError(result.Error)
+	return result.RowsAffected, dberror.Translate(result.Error)
 }
 
 // ListFilesForReindex 分页返回需要重建向量的文件（embed_status 为 none、stale 或 failed）。
@@ -4472,7 +4891,7 @@ func (r *Repo) ListFilesForReindex(ctx context.Context, limit int, afterID uint)
 		Limit(limit).
 		Find(&entities).Error
 	if err != nil {
-		return nil, translateError(err)
+		return nil, dberror.Translate(err)
 	}
 	results := make([]domainconversation.FileObject, 0, len(entities))
 	for i := range entities {

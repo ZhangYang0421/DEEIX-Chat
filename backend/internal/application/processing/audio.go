@@ -12,7 +12,8 @@ import (
 
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/funasr"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
+	infraobjectstore "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"go.uber.org/zap"
 )
@@ -119,11 +120,17 @@ func (s *Service) processAudioFile(ctx context.Context, fileObj *domainconversat
 }
 
 func (s *Service) submitAudio(ctx context.Context, store objectstore.Store, fileObj *domainconversation.FileObject, payload audioProcessingPayload) error {
-	fileURL, err := store.PresignGet(ctx, fileObj.StoragePath, audioPresignExpiry)
+	presigner, ok := store.(interface {
+		PresignGet(context.Context, string, time.Duration) (string, error)
+	})
+	if !ok {
+		return s.failAudio(ctx, fileObj, "transcription_requires_s3", "录音转写需要支持预签名下载的对象存储")
+	}
+	fileURL, err := presigner.PresignGet(ctx, fileObj.StoragePath, audioPresignExpiry)
 	if err != nil {
 		code := "transcription_presign_failed"
 		message := "无法生成录音临时下载地址"
-		if errors.Is(err, objectstore.ErrUnsupported) {
+		if errors.Is(err, infraobjectstore.ErrUnsupported) {
 			code = "transcription_requires_s3"
 			message = "录音转写需要支持预签名下载的对象存储"
 		}

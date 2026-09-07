@@ -2,7 +2,9 @@ package objectstore
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	portobjectstore "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/objectstore"
@@ -32,7 +34,7 @@ type Store interface {
 	PresignGet(ctx context.Context, key string, expires time.Duration) (string, error)
 }
 
-func New(ctx context.Context, cfg config.Config) (Store, error) {
+func New(ctx context.Context, cfg config.Config) (portobjectstore.Store, error) {
 	switch normalizeBackend(cfg.StorageBackend) {
 	case BackendS3:
 		return NewS3(ctx, S3Config{

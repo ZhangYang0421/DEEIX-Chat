@@ -5,6 +5,7 @@ import (
 	"time"
 
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/dberror"
 	models "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"gorm.io/gorm"
@@ -19,7 +20,7 @@ func (r *Repo) UpdateFileObjectProcessingState(ctx context.Context, item *domain
 		Where("id = ? AND user_id = ?", item.FileObjectID, item.UserID).
 		Updates(fileObjectProcessingStateUpdates(item))
 	if result.Error != nil {
-		return translateError(result.Error)
+		return dberror.Translate(result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return repository.ErrNotFound
@@ -44,7 +45,7 @@ func (r *Repo) UpdateClaimedFileObjectProcessingState(
 		Where("id = ? AND user_id = ? AND processing_attempt_id = ?", item.FileObjectID, item.UserID, attemptID).
 		Updates(updates)
 	if result.Error != nil {
-		return false, translateError(result.Error)
+		return false, dberror.Translate(result.Error)
 	}
 	return result.RowsAffected > 0, nil
 }
@@ -218,7 +219,7 @@ func (r *Repo) TryClaimFileObjectProcessing(
 	result := r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
 		Where("user_id = ? AND file_id = ? AND processing_status IN ?", userID, fileID, claimableStatuses).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"processing_status":        "extracting",
 			"processing_ready":         false,
 			"processing_error_code":    "",
@@ -231,7 +232,7 @@ func (r *Repo) TryClaimFileObjectProcessing(
 			"updated_at":               now,
 		})
 	if result.Error != nil {
-		return false, translateError(result.Error)
+		return false, dberror.Translate(result.Error)
 	}
 	return result.RowsAffected > 0, nil
 }
@@ -252,7 +253,7 @@ func (r *Repo) ResetFileObjectProcessingForRetry(
 			attemptID,
 			[]string{"extracting", "embedding"},
 		).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"processing_status":       "queued",
 			"processing_ready":        false,
 			"extract_status":          "none",
@@ -261,7 +262,7 @@ func (r *Repo) ResetFileObjectProcessingForRetry(
 			"updated_at":              now,
 		})
 	if result.Error != nil {
-		return false, translateError(result.Error)
+		return false, dberror.Translate(result.Error)
 	}
 	return result.RowsAffected > 0, nil
 }
