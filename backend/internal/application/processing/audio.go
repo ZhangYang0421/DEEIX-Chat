@@ -13,6 +13,7 @@ import (
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/funasr"
 	infraobjectstore "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/textutil"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"go.uber.org/zap"
@@ -236,7 +237,7 @@ func (s *Service) pollAudio(ctx context.Context, store objectstore.Store, fileOb
 
 	payload.Stage = "completed"
 	completedAt := time.Now()
-	preview := compactSnippet(transcriptMarkdown, defaultProcessingPreview)
+	preview := textutil.CompactSnippet(transcriptMarkdown, defaultProcessingPreview)
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return err
