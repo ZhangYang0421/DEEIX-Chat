@@ -20,6 +20,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/llm"
+	portobjectstore "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/objectstore"
 )
 
 func TestFileContextPlanRAGObjectsPreservesFileRevision(t *testing.T) {
@@ -38,11 +39,11 @@ func TestFileContextPlanRAGObjectsPreservesFileRevision(t *testing.T) {
 }
 
 type conversationTestStoreProvider struct {
-	store objectstore.Store
+	store portobjectstore.Store
 	opens int
 }
 
-func (p *conversationTestStoreProvider) Open(context.Context) (objectstore.Store, error) {
+func (p *conversationTestStoreProvider) Open(context.Context) (portobjectstore.Store, error) {
 	p.opens++
 	return p.store, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -29,7 +30,11 @@ func TestOpenRouterPricingCacheStoreAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat cache: %v", err)
 	}
-	if info.Mode().Perm() != 0o644 {
+	if runtime.GOOS == "windows" {
+		if info.Mode().Perm()&0o111 != 0 {
+			t.Fatalf("cache must not be executable on Windows, permissions = %o", info.Mode().Perm())
+		}
+	} else if info.Mode().Perm() != 0o644 {
 		t.Fatalf("cache permissions = %o, want 644", info.Mode().Perm())
 	}
 }

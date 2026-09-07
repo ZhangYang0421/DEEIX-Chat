@@ -953,7 +953,7 @@ func parsePaddleJSONL(body io.Reader, ranges []PageRange) (Response, error) {
 		}
 	}
 	if len(pages) == 0 {
-		return Response{}, fmt.Errorf(errOCREmptyContent)
+		return Response{}, errors.New(errOCREmptyContent)
 	}
 	parts := make([]string, 0, len(pages))
 	for _, page := range pages {

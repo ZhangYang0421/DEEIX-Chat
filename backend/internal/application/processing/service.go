@@ -13,8 +13,8 @@ import (
 	appstorage "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/objectstorage"
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/funasr"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/textutil"
+	portfunasr "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/funasr"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/apperr"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/background"
@@ -99,6 +99,7 @@ type Service struct {
 	embeddingSvc     *appembedding.Service
 	storeProvider    appstorage.Provider
 	transcriber      AudioTranscriber
+	funASRCodec      portfunasr.Codec
 	logger           *zap.Logger
 	extractorVersion string
 	// fallbackSlots 是无队列缓存降级模式下的并发信号量，防止处理 goroutine 无界增长。
@@ -114,6 +115,7 @@ type Dependencies struct {
 	EmbeddingService *appembedding.Service
 	Logger           *zap.Logger
 	ExtractorVersion string
+	FunASRCodec      portfunasr.Codec
 }
 
 // NewServiceWithRuntime 创建使用运行时配置容器的文件处理服务。
@@ -124,6 +126,7 @@ func NewServiceWithRuntime(deps Dependencies) *Service {
 		cache:            deps.Cache,
 		extractSvc:       deps.ExtractService,
 		embeddingSvc:     deps.EmbeddingService,
+		funASRCodec:      deps.FunASRCodec,
 		logger:           deps.Logger,
 		extractorVersion: strings.TrimSpace(deps.ExtractorVersion),
 		fallbackSlots:    make(chan struct{}, fallbackProcessingConcurrency),
@@ -132,8 +135,8 @@ func NewServiceWithRuntime(deps Dependencies) *Service {
 
 // AudioTranscriber 定义文件处理流水线使用的最小 Fun-ASR 能力。
 type AudioTranscriber interface {
-	Submit(ctx context.Context, in funasr.SubmitInput) (*funasr.SubmitResult, error)
-	GetTask(ctx context.Context, taskID string) (*funasr.TaskStatus, error)
+	Submit(ctx context.Context, in portfunasr.SubmitInput) (*portfunasr.SubmitResult, error)
+	GetTask(ctx context.Context, taskID string) (*portfunasr.TaskStatus, error)
 	DownloadJSON(ctx context.Context, url string) (json.RawMessage, error)
 	Configured() bool
 	Model() string
@@ -150,6 +153,13 @@ func (s *Service) SetObjectStoreProvider(provider appstorage.Provider) {
 func (s *Service) SetAudioTranscriber(client AudioTranscriber) {
 	if s != nil {
 		s.transcriber = client
+	}
+}
+
+// SetFunASRCodec 注入 Fun-ASR transcript 编解码能力。
+func (s *Service) SetFunASRCodec(codec portfunasr.Codec) {
+	if s != nil {
+		s.funASRCodec = codec
 	}
 }
 
@@ -280,7 +290,7 @@ func (s *Service) InitializeUploadedFile(ctx context.Context, fileObj *domaincon
 		payload, marshalErr := json.Marshal(audioProcessingPayload{
 			Version:  1,
 			Provider: "dashscope",
-			Model:    funasr.DefaultModel,
+			Model:    portfunasr.DefaultModel,
 			Stage:    "uploaded",
 		})
 		if marshalErr != nil {

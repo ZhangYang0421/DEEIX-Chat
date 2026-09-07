@@ -16,6 +16,7 @@ import (
 	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
+	portobjectstore "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/gin-gonic/gin"
 )
@@ -211,7 +212,7 @@ type countingModelIconStoreProvider struct {
 	opens int
 }
 
-func (p *countingModelIconStoreProvider) Open(context.Context) (objectstore.Store, error) {
+func (p *countingModelIconStoreProvider) Open(context.Context) (portobjectstore.Store, error) {
 	p.opens++
 	return p.store, nil
 }

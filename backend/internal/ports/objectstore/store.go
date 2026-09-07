@@ -13,6 +13,8 @@ var (
 	ErrInvalidKey = errors.New("invalid object key")
 	// ErrNotFound 表示对象不存在。
 	ErrNotFound = errors.New("object not found")
+	// ErrUnsupported 表示当前存储后端不支持该能力。
+	ErrUnsupported = errors.New("operation not supported")
 )
 
 // PutOptions 描述写入对象时的元信息。

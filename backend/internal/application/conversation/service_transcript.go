@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/funasr"
+	portfunasr "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/funasr"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
 
 type TranscriptResult struct {
 	FileID       string
-	Document     funasr.TranscriptDocument
+	Document     portfunasr.TranscriptDocument
 	Markdown     string
 	RawPath      string
 	JSONPath     string
@@ -62,7 +62,7 @@ func (s *Service) GetFileTranscript(ctx context.Context, userID uint, fileID str
 		return nil, err
 	}
 	defer reader.Close()
-	var doc funasr.TranscriptDocument
+	var doc portfunasr.TranscriptDocument
 	if err = json.NewDecoder(reader).Decode(&doc); err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func (s *Service) PatchFileTranscript(ctx context.Context, userID uint, fileID s
 	persisted := false
 	defer func() {
 		if !persisted {
-			_, _ = s.repo.CompareAndSwapTranscriptRevision(context.Background(), userID, normalizedFileID, patch.Revision+1)
+			_, _ = s.repo.CompareAndSwapTranscriptRevision(context.WithoutCancel(ctx), userID, normalizedFileID, patch.Revision+1)
 		}
 	}()
 
@@ -113,7 +113,7 @@ func (s *Service) PatchFileTranscript(ctx context.Context, userID uint, fileID s
 		}
 		result.Document.SpeakerNames[key] = strings.TrimSpace(name)
 	}
-	segments := make(map[string]*funasr.Segment, len(result.Document.Segments))
+	segments := make(map[string]*portfunasr.Segment, len(result.Document.Segments))
 	for i := range result.Document.Segments {
 		segments[result.Document.Segments[i].SegmentID] = &result.Document.Segments[i]
 	}
@@ -152,7 +152,10 @@ func (s *Service) PatchFileTranscript(ctx context.Context, userID uint, fileID s
 		result.Document.SpeakerOverrides = nil
 	}
 
-	result.Markdown = funasr.RenderMarkdown(&result.Document, true)
+	if s.funASRCodec == nil {
+		return nil, ErrTranscriptInvalidEdit
+	}
+	result.Markdown = s.funASRCodec.RenderMarkdown(&result.Document, true)
 	jsonData, err := json.MarshalIndent(result.Document, "", "  ")
 	if err != nil {
 		return nil, err
@@ -166,11 +169,11 @@ func (s *Service) PatchFileTranscript(ctx context.Context, userID uint, fileID s
 	if _, err = store.Put(ctx, jsonTempPath, strings.NewReader(string(jsonData)), appstoragePutOptions("application/json", int64(len(jsonData)))); err != nil {
 		return nil, err
 	}
-	defer func() { _ = store.Delete(context.Background(), jsonTempPath) }()
+	defer func() { _ = store.Delete(context.WithoutCancel(ctx), jsonTempPath) }()
 	if _, err = store.Put(ctx, markdownTempPath, strings.NewReader(result.Markdown), appstoragePutOptions("text/markdown; charset=utf-8", int64(len(result.Markdown)))); err != nil {
 		return nil, err
 	}
-	defer func() { _ = store.Delete(context.Background(), markdownTempPath) }()
+	defer func() { _ = store.Delete(context.WithoutCancel(ctx), markdownTempPath) }()
 	if err = copyTranscriptObject(ctx, store, jsonTempPath, result.JSONPath, "application/json"); err != nil {
 		return nil, err
 	}
@@ -183,7 +186,7 @@ func (s *Service) PatchFileTranscript(ctx context.Context, userID uint, fileID s
 	if lookupErr == nil && fileObj != nil && s.embeddingSvc != nil && s.embeddingSvc.ShouldTrigger(*fileObj) {
 		fileObj.ExtractStoragePath = result.MarkdownPath
 		fileObj.ExtractStatus = "ready"
-		s.embeddingSvc.Trigger(*fileObj)
+		s.embeddingSvc.MaybeTrigger(ctx, *fileObj)
 	}
 	return result, nil
 }

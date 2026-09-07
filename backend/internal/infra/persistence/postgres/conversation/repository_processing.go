@@ -11,6 +11,10 @@ import (
 	"gorm.io/gorm"
 )
 
+func translateError(err error) error {
+	return dberror.Translate(err)
+}
+
 func (r *Repo) UpdateFileObjectProcessingState(ctx context.Context, item *domainconversation.FileObjectProcessing) error {
 	if item == nil {
 		return nil

@@ -13,9 +13,9 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/extraction"
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/funasr"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/filetype"
 	portembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/embedding"
+	portfunasr "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/funasr"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/apperr"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/background"
@@ -126,6 +126,7 @@ type Service struct {
 	extractSvc  *extraction.Service
 	embedClient EmbeddingClient
 	logger      *zap.Logger
+	funASRCodec portfunasr.Codec
 	workSlots   chan struct{}
 	reindexJobs chan string
 	reindexMu   sync.Mutex
@@ -151,6 +152,13 @@ func NewServiceWithRuntime(cfg *config.Runtime, repo repository.EmbeddingReposit
 		logger:      logger,
 		workSlots:   make(chan struct{}, WorkerConcurrency),
 		reindexJobs: make(chan string, 1),
+	}
+}
+
+// SetFunASRCodec 注入音频 transcript 编解码能力。
+func (s *Service) SetFunASRCodec(codec portfunasr.Codec) {
+	if s != nil {
+		s.funASRCodec = codec
 	}
 }
 
@@ -629,11 +637,13 @@ func (s *Service) chunksForFile(ctx context.Context, fileObj domainconversation.
 			if json.Unmarshal([]byte(processing.PayloadJSON), &payload) == nil && strings.TrimSpace(payload.TranscriptJSONPath) != "" {
 				raw, readErr := s.extractSvc.ReadExtractedText(ctx, payload.TranscriptJSONPath)
 				if readErr == nil {
-					var doc funasr.TranscriptDocument
-					if json.Unmarshal([]byte(raw), &doc) == nil {
-						chunks := funasr.BuildTimeWindowChunks(&doc, 2*time.Minute, 15*time.Second)
-						if len(chunks) > 0 {
-							return chunks, nil
+					if s.funASRCodec != nil {
+						var doc portfunasr.TranscriptDocument
+						if json.Unmarshal([]byte(raw), &doc) == nil {
+							chunks := s.funASRCodec.BuildTimeWindowChunks(&doc, 2*time.Minute, 15*time.Second)
+							if len(chunks) > 0 {
+								return chunks, nil
+							}
 						}
 					}
 				}

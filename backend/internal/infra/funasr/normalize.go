@@ -7,35 +7,32 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	portfunasr "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/funasr"
 )
 
 // Segment is one normalized transcript sentence.
-type Segment struct {
-	SegmentID     string  `json:"segmentID"`
-	StartMs       int64   `json:"startMs"`
-	EndMs         int64   `json:"endMs"`
-	SpeakerID     *int    `json:"speakerID"`
-	Text          string  `json:"text"`
-	OriginalText  string  `json:"originalText"`
-	AvgConfidence float64 `json:"avgConfidence,omitempty"`
-	LowConfidence bool    `json:"lowConfidence,omitempty"`
-	Edited        bool    `json:"edited,omitempty"`
-}
+type Segment = portfunasr.Segment
 
 // TranscriptDocument is the editable structured transcript stored as transcript.json.
-type TranscriptDocument struct {
-	Version          int               `json:"version"`
-	Revision         int               `json:"revision"`
-	Source           string            `json:"source"`
-	Model            string            `json:"model"`
-	FileID           string            `json:"fileID,omitempty"`
-	FileName         string            `json:"fileName,omitempty"`
-	DurationMs       *int64            `json:"durationMs,omitempty"`
-	SpeakerNames     map[string]string `json:"speakerNames"`
-	SpeakerOverrides map[string]string `json:"speakerOverrides,omitempty"`
-	Segments         []Segment         `json:"segments"`
-	UpdatedAt        string            `json:"updatedAt,omitempty"`
+type TranscriptDocument = portfunasr.TranscriptDocument
+
+// Codec adapts the existing normalization helpers to the application port.
+type Codec struct{}
+
+func (Codec) Normalize(raw json.RawMessage, model string) (*TranscriptDocument, error) {
+	return NormalizeRaw(raw, model)
 }
+
+func (Codec) RenderMarkdown(doc *TranscriptDocument, forRAG bool) string {
+	return RenderMarkdown(doc, forRAG)
+}
+
+func (Codec) BuildTimeWindowChunks(doc *TranscriptDocument, window, overlap time.Duration) []string {
+	return BuildTimeWindowChunks(doc, window, overlap)
+}
+
+var _ portfunasr.Codec = Codec{}
 
 // NormalizeRaw converts a Fun-ASR result.raw.json payload into a TranscriptDocument.
 func NormalizeRaw(raw json.RawMessage, model string) (*TranscriptDocument, error) {
@@ -325,6 +322,8 @@ func asString(v any) string {
 	switch t := v.(type) {
 	case string:
 		return t
+	case json.Number:
+		return t.String()
 	case fmt.Stringer:
 		return t.String()
 	case float64:
@@ -332,8 +331,6 @@ func asString(v any) string {
 			return fmt.Sprintf("%d", int64(t))
 		}
 		return fmt.Sprintf("%v", t)
-	case json.Number:
-		return t.String()
 	default:
 		if v == nil {
 			return ""

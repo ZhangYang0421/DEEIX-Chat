@@ -11,7 +11,7 @@ import (
 	appprocessing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/processing"
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/funasr"
+	portfunasr "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/funasr"
 )
 
 // ---------- Conversation ----------
@@ -1431,8 +1431,8 @@ func toFileProcessingStatusResponse(d *appprocessing.FileProcessingStatusDTO) Fi
 
 // TranscriptResponse 结构化录音转写响应。
 type TranscriptResponse struct {
-	FileID   string                    `json:"fileID"`
-	Document funasr.TranscriptDocument `json:"document"`
+	FileID   string                        `json:"fileID"`
+	Document portfunasr.TranscriptDocument `json:"document"`
 }
 
 func toTranscriptResponse(result *appconversation.TranscriptResult) TranscriptResponse {

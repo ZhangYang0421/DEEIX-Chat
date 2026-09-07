@@ -359,6 +359,11 @@ func (r *messageTraceRecorder) ensureToolDraft(roundID string, parentEventID str
 
 func (r *messageTraceRecorder) newTraceDraft(traceType string, eventType string, title string, blockSeq int, stage string, roundID string, parentEventID string) *messageTraceDraft {
 	eventID, eventSeq := r.nextTraceEventIdentity(traceType)
+	startedAt := time.Now()
+	if traceType == messageTraceTypeUpstreamThink && r != nil && r.upstreamThink != nil && !startedAt.After(r.upstreamThink.startedAt) {
+		// Windows 时钟分辨率可能让连续两轮获得相同时间戳；保持 round 时间严格递增。
+		startedAt = r.upstreamThink.startedAt.Add(time.Nanosecond)
+	}
 	return &messageTraceDraft{
 		traceType:     traceType,
 		eventID:       eventID,
@@ -370,7 +375,7 @@ func (r *messageTraceRecorder) newTraceDraft(traceType string, eventType string,
 		status:        messageTraceStatusStreaming,
 		title:         title,
 		seq:           blockSeq,
-		startedAt:     time.Now(),
+		startedAt:     startedAt,
 		payload:       &tracePayload{},
 	}
 }

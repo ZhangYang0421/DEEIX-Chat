@@ -11,9 +11,8 @@ import (
 	"time"
 
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/funasr"
-	infraobjectstore "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/textutil"
+	portfunasr "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/funasr"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"go.uber.org/zap"
@@ -131,7 +130,7 @@ func (s *Service) submitAudio(ctx context.Context, store objectstore.Store, file
 	if err != nil {
 		code := "transcription_presign_failed"
 		message := "无法生成录音临时下载地址"
-		if errors.Is(err, infraobjectstore.ErrUnsupported) {
+		if errors.Is(err, objectstore.ErrUnsupported) {
 			code = "transcription_requires_s3"
 			message = "录音转写需要支持预签名下载的对象存储"
 		}
@@ -140,7 +139,7 @@ func (s *Service) submitAudio(ctx context.Context, store objectstore.Store, file
 
 	requestCtx, cancel := context.WithTimeout(ctx, audioRequestTimeout)
 	defer cancel()
-	result, err := s.transcriber.Submit(requestCtx, funasr.SubmitInput{FileURL: fileURL})
+	result, err := s.transcriber.Submit(requestCtx, portfunasr.SubmitInput{FileURL: fileURL})
 	if err != nil {
 		return s.failAudio(ctx, fileObj, audioErrorCode(err), audioErrorMessage(err))
 	}
@@ -209,7 +208,10 @@ func (s *Service) pollAudio(ctx context.Context, store objectstore.Store, fileOb
 	if model == "" {
 		model = s.transcriber.Model()
 	}
-	doc, err := funasr.NormalizeRaw(rawResult, model)
+	if s.funASRCodec == nil {
+		return s.failAudio(ctx, fileObj, "transcription_result_invalid", "录音转写结果无法解析，请手动重试")
+	}
+	doc, err := s.funASRCodec.Normalize(rawResult, model)
 	if err != nil {
 		return s.failAudio(ctx, fileObj, "transcription_result_invalid", "录音转写结果无法解析，请手动重试")
 	}
@@ -219,7 +221,7 @@ func (s *Service) pollAudio(ctx context.Context, store objectstore.Store, fileOb
 	if err != nil {
 		return s.failAudio(ctx, fileObj, "transcription_result_invalid", "录音转写结果无法保存，请手动重试")
 	}
-	transcriptMarkdown := funasr.RenderMarkdown(doc, true)
+	transcriptMarkdown := s.funASRCodec.RenderMarkdown(doc, true)
 
 	basePath := filepath.ToSlash(filepath.Join(".transcripts", fmt.Sprintf("uid_%d", fileObj.UserID), fileObj.FileID))
 	payload.RawResultPath = basePath + "/result.raw.json"
@@ -289,7 +291,7 @@ func (s *Service) pollAudio(ctx context.Context, store objectstore.Store, fileOb
 	}
 	if s.embeddingSvc != nil && s.embeddingSvc.ShouldTrigger(*fileObj) {
 		// 转写已完成即可发送；RAG 索引在后台生成，避免 embedding 故障把录音误标为转写失败。
-		s.embeddingSvc.Trigger(*fileObj)
+		s.embeddingSvc.MaybeTrigger(ctx, *fileObj)
 	}
 	return nil
 }
@@ -336,7 +338,7 @@ func (s *Service) scheduleAudioPoll(ctx context.Context, userID uint, fileID str
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			if err := s.enqueueFileProcessing(context.Background(), userID, fileID, 0, ""); err != nil && s.logger != nil {
+			if err := s.enqueueFileProcessing(context.WithoutCancel(ctx), userID, fileID, 0, ""); err != nil && s.logger != nil {
 				s.logger.Warn("enqueue_audio_poll_failed", zap.Uint("user_id", userID), zap.String("file_id", fileID), zap.Error(err))
 			}
 		}
@@ -360,7 +362,7 @@ func (s *Service) recoverAudioProcessing(ctx context.Context) {
 }
 
 func parseAudioProcessingPayload(raw string) audioProcessingPayload {
-	payload := audioProcessingPayload{Version: 1, Provider: "dashscope", Model: funasr.DefaultModel, Stage: "uploaded"}
+	payload := audioProcessingPayload{Version: 1, Provider: "dashscope", Model: portfunasr.DefaultModel, Stage: "uploaded"}
 	if strings.TrimSpace(raw) != "" {
 		_ = json.Unmarshal([]byte(raw), &payload)
 	}
@@ -381,14 +383,14 @@ func putAudioArtifact(ctx context.Context, store objectstore.Store, path string,
 }
 
 func audioErrorCode(err error) string {
-	if errors.Is(err, funasr.ErrNotConfigured) {
+	if errors.Is(err, portfunasr.ErrNotConfigured) {
 		return "transcription_not_configured"
 	}
 	return "transcription_request_failed"
 }
 
 func audioErrorMessage(err error) string {
-	if errors.Is(err, funasr.ErrNotConfigured) {
+	if errors.Is(err, portfunasr.ErrNotConfigured) {
 		return "录音转写服务未配置"
 	}
 	return "录音转写请求失败，请稍后手动重试"

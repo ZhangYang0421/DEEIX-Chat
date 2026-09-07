@@ -9,6 +9,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/extraction"
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
 
 func TestExtractTextForProcessingRequiresExtractionService(t *testing.T) {
@@ -52,6 +53,18 @@ func (r *processingStateRepositoryStub) UpdateClaimedFileObjectProcessingState(
 
 func (*processingStateRepositoryStub) GetFileObjectProcessingByObjectID(context.Context, uint) (*domainconversation.FileObjectProcessing, error) {
 	return nil, nil
+}
+
+func (*processingStateRepositoryStub) ListRecoverableAudioFileObjects(context.Context, int) ([]domainconversation.FileObject, error) {
+	return nil, nil
+}
+
+func (*processingStateRepositoryStub) CompareAndSwapTranscriptRevision(context.Context, uint, string, int) (bool, error) {
+	return true, nil
+}
+
+func (*processingStateRepositoryStub) UpdateFileObjectProcessing(context.Context, uint, string, repository.UpdateFileObjectProcessingInput) error {
+	return nil
 }
 
 func (*processingStateRepositoryStub) CloneFileObjectProcessingState(context.Context, uint, uint, uint) error {

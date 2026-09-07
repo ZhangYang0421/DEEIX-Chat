@@ -58,6 +58,19 @@ func (r *Repo) trimFunctionName() string {
 	return "btrim"
 }
 
+type fileChunkSearchRow struct {
+	ID         uint      `gorm:"column:id"`
+	FileObjID  uint      `gorm:"column:file_obj_id"`
+	UserID     uint      `gorm:"column:user_id"`
+	ChunkIndex int       `gorm:"column:chunk_index"`
+	PageNum    int       `gorm:"column:page_num"`
+	CharOffset int       `gorm:"column:char_offset"`
+	Content    string    `gorm:"column:content"`
+	TokenCount int       `gorm:"column:token_count"`
+	CreatedAt  time.Time `gorm:"column:created_at"`
+	Similarity float32   `gorm:"column:similarity"`
+}
+
 // CreateConversation 创建会话。
 func (r *Repo) CreateConversation(ctx context.Context, item *domainconversation.Conversation) error {
 	entity := toConversationModel(item)
@@ -2589,112 +2602,112 @@ func buildSingleFileKindWhereClause(filterKind string) (string, []any) {
 		return "(LOWER(mime_type) = ? OR LOWER(file_name) LIKE ?)", []any{"application/pdf", "%.pdf"}
 	case "spreadsheet":
 		return "(" + strings.Join([]string{
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-			}, " OR ") + ")", []any{
-				"%spreadsheet%",
-				"%excel%",
-				"%csv%",
-				"%.xls",
-				"%.xlsx",
-				"%.csv",
-				"%.ods",
-			}
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+		}, " OR ") + ")", []any{
+			"%spreadsheet%",
+			"%excel%",
+			"%csv%",
+			"%.xls",
+			"%.xlsx",
+			"%.csv",
+			"%.ods",
+		}
 	case "presentation":
 		return "(" + strings.Join([]string{
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-			}, " OR ") + ")", []any{
-				"%presentation%",
-				"%powerpoint%",
-				"%.ppt",
-				"%.pptx",
-				"%.odp",
-			}
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+		}, " OR ") + ")", []any{
+			"%presentation%",
+			"%powerpoint%",
+			"%.ppt",
+			"%.pptx",
+			"%.odp",
+		}
 	case "document":
 		return "(" + strings.Join([]string{
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-			}, " OR ") + ")", []any{
-				"%word%",
-				"%rtf%",
-				"%opendocument.text%",
-				"%.doc",
-				"%.docx",
-				"%.rtf",
-				"%.odt",
-				"%.pages",
-			}
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+		}, " OR ") + ")", []any{
+			"%word%",
+			"%rtf%",
+			"%opendocument.text%",
+			"%.doc",
+			"%.docx",
+			"%.rtf",
+			"%.odt",
+			"%.pages",
+		}
 	case "code":
 		return "(" + strings.Join([]string{
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-			}, " OR ") + ")", []any{
-				"text/%",
-				"%json%",
-				"%javascript%",
-				"%typescript%",
-				"%xml%",
-				"%html%",
-				"%css%",
-				"%yaml%",
-				"%toml%",
-				"%sql%",
-				"%markdown%",
-				"%.js",
-				"%.jsx",
-				"%.ts",
-				"%.tsx",
-				"%.json",
-				"%.html",
-				"%.css",
-				"%.md",
-				"%.xml",
-				"%.yaml",
-				"%.yml",
-				"%.toml",
-				"%.sql",
-				"%.sh",
-				"%.py",
-			}
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+		}, " OR ") + ")", []any{
+			"text/%",
+			"%json%",
+			"%javascript%",
+			"%typescript%",
+			"%xml%",
+			"%html%",
+			"%css%",
+			"%yaml%",
+			"%toml%",
+			"%sql%",
+			"%markdown%",
+			"%.js",
+			"%.jsx",
+			"%.ts",
+			"%.tsx",
+			"%.json",
+			"%.html",
+			"%.css",
+			"%.md",
+			"%.xml",
+			"%.yaml",
+			"%.yml",
+			"%.toml",
+			"%.sql",
+			"%.sh",
+			"%.py",
+		}
 	default:
 		return "", nil
 	}
@@ -2939,13 +2952,17 @@ func (r *Repo) ClaimFileEmbedding(ctx context.Context, userID uint, fileID strin
 }
 
 // UpdateFileObjectEmbedStatus 仅更新仍属于指定向量空间任务的文件状态。
+// 同时同步 RAG 可用状态，确保 Embedding 就绪后才允许该文件参与语义检索。
 func (r *Repo) UpdateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, embeddingSignature string, status string, embedErr string) (bool, error) {
+	ragReady, ragReason := embeddingRAGState(status)
 	result := r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
 		Where("user_id = ? AND file_id = ? AND status = ? AND embed_signature = ?", userID, fileID, "active", strings.TrimSpace(embeddingSignature)).
 		Updates(map[string]any{
 			"embed_status": status,
 			"embed_error":  embedErr,
+			"rag_ready":    ragReady,
+			"rag_reason":   ragReason,
 		})
 	return result.RowsAffected > 0, dberror.Translate(result.Error)
 }

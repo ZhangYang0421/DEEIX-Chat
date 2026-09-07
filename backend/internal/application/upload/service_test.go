@@ -16,6 +16,7 @@ import (
 	domainuser "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
+	portobjectstore "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
 
@@ -548,7 +549,7 @@ type uploadTestStoreProvider struct {
 	store *uploadTestStore
 }
 
-func (p uploadTestStoreProvider) Open(ctx context.Context) (objectstore.Store, error) {
+func (p uploadTestStoreProvider) Open(ctx context.Context) (portobjectstore.Store, error) {
 	_ = ctx
 	return p.store, nil
 }

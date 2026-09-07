@@ -25,6 +25,7 @@ import (
 	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
 	domainskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/skill"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
+	portfunasr "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/funasr"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/mcp"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
@@ -140,6 +141,7 @@ type Service struct {
 	auditWriter           auditWriter
 	storeProvider         appstorage.Provider
 	logger                *zap.Logger
+	funASRCodec           portfunasr.Codec
 	moderationSvc         *appcm.Service
 	toolLimiters          sync.Map
 	generationStreams     *generationStreamRegistry
@@ -280,6 +282,7 @@ type Dependencies struct {
 	ExtractService    *extraction.Service
 	RAGService        *apprag.Service
 	Logger            *zap.Logger
+	FunASRCodec       portfunasr.Codec
 }
 
 // NewServiceWithRuntime 创建使用运行时配置容器的服务。
@@ -301,6 +304,7 @@ func NewServiceWithRuntime(deps Dependencies) *Service {
 		extractSvc:        deps.ExtractService,
 		ragSvc:            deps.RAGService,
 		logger:            deps.Logger,
+		funASRCodec:       deps.FunASRCodec,
 		generationStreams: newGenerationStreamRegistry(deps.Cache, defaultGenerationStreamOptions()),
 		imageContextCache: defaultPreparedConversationImageCache(),
 	}

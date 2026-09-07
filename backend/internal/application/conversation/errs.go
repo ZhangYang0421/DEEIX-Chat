@@ -103,6 +103,12 @@ var (
 	ErrModelRouteNotConfigured = apperr.NewMasked("llm.model_route_not_configured", "model route is not configured", "model route not configured")
 	// ErrModelAccessDenied 当前用户无权使用此模型。
 	ErrModelAccessDenied = apperr.NewMasked("llm.model_access_denied", "you do not have access to this model", "model access denied by group policy")
+	// ErrModelImageInputUnsupported 当前模型不支持原始图片输入。
+	ErrModelImageInputUnsupported = apperr.New("llm.image_input_unsupported", "model does not support image input")
+	// ErrTranscriptRevisionConflict 表示编辑基于旧版本。
+	ErrTranscriptRevisionConflict = apperr.New("transcript.revision_conflict", "transcript revision conflict")
+	// ErrTranscriptInvalidEdit 表示客户端尝试修改受保护字段或不存在的句段。
+	ErrTranscriptInvalidEdit = apperr.New("transcript.invalid_edit", "invalid transcript edit")
 	// ErrUpstreamRequestFailed 上游请求失败。对外错误码与文案取决于上游错误特征，由 transport 按 MessageErrorCode /
 	// messageErrorSummary 逐次判定，因此不在这里声明。
 	ErrUpstreamRequestFailed = errors.New("upstream request failed")

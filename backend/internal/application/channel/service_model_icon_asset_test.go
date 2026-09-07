@@ -16,6 +16,7 @@ import (
 	appstorage "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/objectstorage"
 	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
+	portobjectstore "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
 
@@ -435,7 +436,7 @@ func (s *modelIconDeleteFailureStore) Delete(ctx context.Context, key string) er
 	return s.Store.Delete(ctx, key)
 }
 
-func (p modelIconStoreProvider) Open(context.Context) (objectstore.Store, error) {
+func (p modelIconStoreProvider) Open(context.Context) (portobjectstore.Store, error) {
 	return p.store, nil
 }
 

@@ -20,7 +20,7 @@ var (
 	ErrInvalidKey    = portobjectstore.ErrInvalidKey
 	ErrInvalidExpiry = errors.New("invalid presign expiry")
 	ErrNotFound      = portobjectstore.ErrNotFound
-	ErrUnsupported   = errors.New("operation not supported")
+	ErrUnsupported   = portobjectstore.ErrUnsupported
 )
 
 type (

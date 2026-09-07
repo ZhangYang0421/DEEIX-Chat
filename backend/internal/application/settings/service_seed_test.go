@@ -89,7 +89,7 @@ func TestSeedMigratesVideoDefaultAllowedMIMETypesToAudio(t *testing.T) {
 	})
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	if got := repo.items["file:allowed_mime_types"].Value; got != defaultAllowedMIMETypes {
@@ -106,7 +106,7 @@ func TestSeedMigratesMP3DefaultAllowedMIMETypesToM4A(t *testing.T) {
 	})
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	if got := repo.items["file:allowed_mime_types"].Value; got != defaultAllowedMIMETypes {
@@ -123,7 +123,7 @@ func TestSeedMigratesLegacyDefaultStorageQuota(t *testing.T) {
 	})
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	if got := repo.items["storage:user_storage_quota_bytes"].Value; got != "10737418240" {
@@ -135,7 +135,7 @@ func TestSeedUsesTenGiBDefaultStorageQuota(t *testing.T) {
 	repo := newSettingsSeedRepo()
 	service := NewService(repo, "")
 
-	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+	if err := service.Seed(context.Background()); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 	if got := repo.items["storage:user_storage_quota_bytes"].Value; got != "10737418240" {

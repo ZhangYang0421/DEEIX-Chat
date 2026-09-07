@@ -193,17 +193,17 @@ func (h *Handler) RetryFileProcessing(c *gin.Context) {
 	userID := middleware.MustUserID(c)
 	fileID := strings.TrimSpace(c.Param("file_id"))
 	if fileID == "" {
-		response.Error(c, http.StatusBadRequest, "invalid file id")
+		response.ErrorWithCode(c, http.StatusBadRequest, response.CodeRequestInvalidID)
 		return
 	}
-	if err := h.service.RetryFileProcessing(c.Request.Context(), userID, fileID); err != nil {
+	if err := h.processing.RetryFileProcessing(c.Request.Context(), userID, fileID); err != nil {
 		switch {
 		case errors.Is(err, appconversation.ErrFileNotFound):
-			response.Error(c, http.StatusNotFound, "file not found")
+			response.ErrorFrom(c, http.StatusNotFound, err)
 		case errors.Is(err, appprocessing.ErrFileRetryNotAllowed):
-			response.ErrorWithCode(c, http.StatusConflict, "file_processing_retry_not_allowed", "file processing retry not allowed")
+			response.ErrorWithCode(c, http.StatusConflict, "file.processing_retry_not_allowed")
 		default:
-			response.Error(c, http.StatusInternalServerError, "retry file processing failed")
+			response.InternalError(c)
 		}
 		return
 	}
@@ -214,17 +214,17 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 	userID := middleware.MustUserID(c)
 	fileID := strings.TrimSpace(c.Param("file_id"))
 	if fileID == "" {
-		response.Error(c, http.StatusBadRequest, "invalid file id")
+		response.ErrorWithCode(c, http.StatusBadRequest, response.CodeRequestInvalidID)
 		return
 	}
-	if err := h.service.RetryAudioTranscription(c.Request.Context(), userID, fileID); err != nil {
+	if err := h.processing.RetryAudioTranscription(c.Request.Context(), userID, fileID); err != nil {
 		switch {
 		case errors.Is(err, appconversation.ErrFileNotFound):
-			response.Error(c, http.StatusNotFound, "file not found")
+			response.ErrorFrom(c, http.StatusNotFound, err)
 		case errors.Is(err, appprocessing.ErrAudioRetryNotAllowed):
-			response.ErrorWithCode(c, http.StatusConflict, "transcription_retry_not_allowed", "audio transcription retry not allowed")
+			response.ErrorWithCode(c, http.StatusConflict, "audio.transcription_retry_not_allowed")
 		default:
-			response.Error(c, http.StatusInternalServerError, "retry audio transcription failed")
+			response.InternalError(c)
 		}
 		return
 	}
@@ -236,18 +236,18 @@ func (h *Handler) GetFileTranscript(c *gin.Context) {
 	userID := middleware.MustUserID(c)
 	fileID := strings.TrimSpace(c.Param("file_id"))
 	if fileID == "" {
-		response.Error(c, http.StatusBadRequest, "invalid file id")
+		response.ErrorWithCode(c, http.StatusBadRequest, response.CodeRequestInvalidID)
 		return
 	}
 	result, err := h.service.GetFileTranscript(c.Request.Context(), userID, fileID)
 	if err != nil {
 		switch {
 		case errors.Is(err, appconversation.ErrFileNotFound):
-			response.Error(c, http.StatusNotFound, "file not found")
+			response.ErrorFrom(c, http.StatusNotFound, err)
 		case errors.Is(err, appconversation.ErrFileProcessingNotReady):
-			response.ErrorWithCode(c, http.StatusConflict, "transcript_not_ready", "transcript not ready")
+			response.ErrorWithCode(c, http.StatusConflict, "transcript.not_ready")
 		default:
-			response.Error(c, http.StatusInternalServerError, "get transcript failed")
+			response.InternalError(c)
 		}
 		return
 	}
@@ -259,7 +259,7 @@ func (h *Handler) PatchFileTranscript(c *gin.Context) {
 	userID := middleware.MustUserID(c)
 	fileID := strings.TrimSpace(c.Param("file_id"))
 	if fileID == "" {
-		response.Error(c, http.StatusBadRequest, "invalid file id")
+		response.ErrorWithCode(c, http.StatusBadRequest, response.CodeRequestInvalidID)
 		return
 	}
 	var req PatchFileTranscriptRequest
@@ -275,13 +275,13 @@ func (h *Handler) PatchFileTranscript(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, appconversation.ErrFileNotFound):
-			response.Error(c, http.StatusNotFound, "file not found")
+			response.ErrorFrom(c, http.StatusNotFound, err)
 		case errors.Is(err, appconversation.ErrTranscriptRevisionConflict):
-			response.ErrorWithCode(c, http.StatusConflict, "transcript_revision_conflict", "transcript revision conflict")
+			response.ErrorFrom(c, http.StatusConflict, err)
 		case errors.Is(err, appconversation.ErrTranscriptInvalidEdit):
-			response.ErrorWithCode(c, http.StatusBadRequest, "invalid_transcript_edit", "invalid transcript edit")
+			response.ErrorFrom(c, http.StatusBadRequest, err)
 		default:
-			response.Error(c, http.StatusInternalServerError, "patch transcript failed")
+			response.InternalError(c)
 		}
 		return
 	}

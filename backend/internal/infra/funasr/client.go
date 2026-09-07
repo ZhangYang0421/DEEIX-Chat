@@ -13,18 +13,19 @@ import (
 	"strings"
 	"time"
 
+	portfunasr "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/funasr"
 	sharedsecurity "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 )
 
 const (
 	DefaultBaseURL = "https://dashscope.aliyuncs.com/api/v1"
-	DefaultModel   = "fun-asr"
+	DefaultModel   = portfunasr.DefaultModel
 )
 
 var (
-	ErrNotConfigured = errors.New("fun-asr not configured")
+	ErrNotConfigured = portfunasr.ErrNotConfigured
 	ErrTaskFailed    = errors.New("fun-asr task failed")
-	ErrEmptyResult   = errors.New("fun-asr empty result")
+	ErrEmptyResult   = portfunasr.ErrEmptyResult
 )
 
 type Config struct {
@@ -76,25 +77,11 @@ func (c *Client) Model() string {
 	return c.model
 }
 
-type SubmitInput struct {
-	FileURL string
-}
+type SubmitInput = portfunasr.SubmitInput
+type SubmitResult = portfunasr.SubmitResult
+type TaskStatus = portfunasr.TaskStatus
 
-type SubmitResult struct {
-	TaskID    string
-	RequestID string
-	Raw       json.RawMessage
-}
-
-type TaskStatus struct {
-	TaskID           string
-	Status           string
-	TranscriptionURL string
-	Message          string
-	Raw              json.RawMessage
-	Terminal         bool
-	Succeeded        bool
-}
+var _ portfunasr.Client = (*Client)(nil)
 
 type submitRequest struct {
 	Model      string         `json:"model"`

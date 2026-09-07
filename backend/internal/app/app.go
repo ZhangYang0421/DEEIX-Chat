@@ -334,6 +334,8 @@ func NewApp() (*App, error) {
 	extractionService := extraction.NewServiceWithRuntime(runtimeCfg, extractionFactories)
 	extractionService.SetObjectStoreProvider(objectStoreProvider)
 	embeddingService := appembedding.NewServiceWithRuntime(runtimeCfg, conversationRepo, extractionService, embedClient, log)
+	funASRCodec := funasr.Codec{}
+	embeddingService.SetFunASRCodec(funASRCodec)
 	memoryService.SetEmbeddingProvider(embeddingService)
 	settingsHandler.SetEmbeddingService(embeddingService)
 	processingService := appprocessing.NewServiceWithRuntime(appprocessing.Dependencies{
@@ -343,6 +345,7 @@ func NewApp() (*App, error) {
 		ExtractService:   extractionService,
 		EmbeddingService: embeddingService,
 		Logger:           log,
+		FunASRCodec:      funASRCodec,
 		ExtractorVersion: appprocessing.DefaultExtractorVersion,
 	})
 	processingService.SetObjectStoreProvider(objectStoreProvider)
@@ -385,6 +388,7 @@ func NewApp() (*App, error) {
 		ExtractService:    extractionService,
 		RAGService:        ragService,
 		Logger:            log,
+		FunASRCodec:       funASRCodec,
 	})
 	conversationService.SetBillingService(billingService)
 	conversationService.SetAuditWriter(auditService)
