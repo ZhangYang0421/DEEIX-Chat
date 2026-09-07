@@ -42,7 +42,7 @@ func NormalizeRaw(raw json.RawMessage, model string) (*TranscriptDocument, error
 	if len(bytesTrimSpace(raw)) == 0 {
 		return nil, ErrEmptyResult
 	}
-	var root map[string]interface{}
+	var root map[string]any
 	if err := json.Unmarshal(raw, &root); err != nil {
 		return nil, fmt.Errorf("fun-asr normalize: %w", err)
 	}
@@ -51,22 +51,22 @@ func NormalizeRaw(raw json.RawMessage, model string) (*TranscriptDocument, error
 	}
 
 	var durationMs *int64
-	if props, ok := root["properties"].(map[string]interface{}); ok {
+	if props, ok := root["properties"].(map[string]any); ok {
 		if v, ok := asInt64(props["original_duration_in_milliseconds"]); ok {
 			durationMs = &v
 		}
 	}
 
 	segments := make([]Segment, 0, 64)
-	transcripts, _ := root["transcripts"].([]interface{})
+	transcripts, _ := root["transcripts"].([]any)
 	for _, t := range transcripts {
-		tm, ok := t.(map[string]interface{})
+		tm, ok := t.(map[string]any)
 		if !ok {
 			continue
 		}
-		sentences, _ := tm["sentences"].([]interface{})
+		sentences, _ := tm["sentences"].([]any)
 		for _, s := range sentences {
-			sm, ok := s.(map[string]interface{})
+			sm, ok := s.(map[string]any)
 			if !ok {
 				continue
 			}
@@ -270,8 +270,8 @@ func formatTimestamp(ms int64) string {
 	return fmt.Sprintf("%02d:%02d:%02d.%03d", h, m, s, milli)
 }
 
-func sentenceConfidence(sm map[string]interface{}) (float64, bool) {
-	words, _ := sm["words"].([]interface{})
+func sentenceConfidence(sm map[string]any) (float64, bool) {
+	words, _ := sm["words"].([]any)
 	if len(words) == 0 {
 		return 0, false
 	}
@@ -280,7 +280,7 @@ func sentenceConfidence(sm map[string]interface{}) (float64, bool) {
 	lowWord := false
 	latinSuspect := false
 	for _, w := range words {
-		wm, ok := w.(map[string]interface{})
+		wm, ok := w.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -321,7 +321,7 @@ func looksLatinToken(text string) bool {
 	return letters > 0 && latin == letters && latin >= 3
 }
 
-func asString(v interface{}) string {
+func asString(v any) string {
 	switch t := v.(type) {
 	case string:
 		return t
@@ -342,7 +342,7 @@ func asString(v interface{}) string {
 	}
 }
 
-func asInt64(v interface{}) (int64, bool) {
+func asInt64(v any) (int64, bool) {
 	switch t := v.(type) {
 	case float64:
 		return int64(t), true
@@ -362,12 +362,12 @@ func asInt64(v interface{}) (int64, bool) {
 	}
 }
 
-func asInt(v interface{}) (int, bool) {
+func asInt(v any) (int, bool) {
 	i, ok := asInt64(v)
 	return int(i), ok
 }
 
-func asFloat64(v interface{}) (float64, bool) {
+func asFloat64(v any) (float64, bool) {
 	switch t := v.(type) {
 	case float64:
 		return t, true

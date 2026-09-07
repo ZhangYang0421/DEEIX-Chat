@@ -22,7 +22,7 @@ func ModelAllowsInputModality(capabilitiesJSON string, modality string) bool {
 	if raw == "" {
 		return true
 	}
-	payload := map[string]interface{}{}
+	payload := map[string]any{}
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return true
 	}
@@ -30,7 +30,7 @@ func ModelAllowsInputModality(capabilitiesJSON string, modality string) bool {
 	if !exists {
 		return true
 	}
-	items, ok := configured.([]interface{})
+	items, ok := configured.([]any)
 	if !ok {
 		return false
 	}

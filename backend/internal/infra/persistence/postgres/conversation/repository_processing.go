@@ -101,7 +101,7 @@ func (r *Repo) CompareAndSwapTranscriptRevision(ctx context.Context, userID uint
 		Model(&models.FileObject{}).
 		Where("user_id = ? AND file_id = ? AND status = ? AND file_category = ?", userID, fileID, "active", "audio").
 		Where(whereRevision, expectedRevision).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			processingPayloadColumn: updatedPayload,
 			"updated_at":            time.Now(),
 		})
@@ -155,8 +155,8 @@ func (r *Repo) UpdateFileObjectProcessing(
 	return nil
 }
 
-func fileObjectProcessingUpdates(input repository.UpdateFileObjectProcessingInput) map[string]interface{} {
-	updates := make(map[string]interface{})
+func fileObjectProcessingUpdates(input repository.UpdateFileObjectProcessingInput) map[string]any {
+	updates := make(map[string]any)
 	if input.ProcessingStatus != nil {
 		updates["processing_status"] = *input.ProcessingStatus
 	}
@@ -193,7 +193,7 @@ func fileObjectProcessingUpdates(input repository.UpdateFileObjectProcessingInpu
 	return updates
 }
 
-func nullableTimeValue(value *time.Time) interface{} {
+func nullableTimeValue(value *time.Time) any {
 	if value == nil {
 		return nil
 	}

@@ -81,7 +81,7 @@ func GetModelCapsFromCapabilities(modelName string, capabilitiesJSON string) Mod
 		return caps
 	}
 
-	payload := map[string]interface{}{}
+	payload := map[string]any{}
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return caps
 	}
@@ -94,7 +94,7 @@ func GetModelCapsFromCapabilities(modelName string, capabilitiesJSON string) Mod
 	return caps
 }
 
-func firstPositiveInt(payload map[string]interface{}, keys ...string) (int, bool) {
+func firstPositiveInt(payload map[string]any, keys ...string) (int, bool) {
 	for _, key := range keys {
 		if value, ok := positiveInt(payload[key]); ok {
 			return value, true
@@ -103,7 +103,7 @@ func firstPositiveInt(payload map[string]interface{}, keys ...string) (int, bool
 	return 0, false
 }
 
-func positiveInt(value interface{}) (int, bool) {
+func positiveInt(value any) (int, bool) {
 	switch v := value.(type) {
 	case float64:
 		if v > 0 {
@@ -132,7 +132,7 @@ func ModelAllowsInputModality(capabilitiesJSON string, modality string) bool {
 	if raw == "" {
 		return true
 	}
-	payload := map[string]interface{}{}
+	payload := map[string]any{}
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return true
 	}
@@ -140,7 +140,7 @@ func ModelAllowsInputModality(capabilitiesJSON string, modality string) bool {
 	if !exists {
 		return true
 	}
-	items, ok := configured.([]interface{})
+	items, ok := configured.([]any)
 	if !ok {
 		return false
 	}

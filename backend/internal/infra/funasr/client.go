@@ -97,9 +97,9 @@ type TaskStatus struct {
 }
 
 type submitRequest struct {
-	Model      string                 `json:"model"`
-	Input      map[string]interface{} `json:"input"`
-	Parameters map[string]interface{} `json:"parameters"`
+	Model      string         `json:"model"`
+	Input      map[string]any `json:"input"`
+	Parameters map[string]any `json:"parameters"`
 }
 
 // Submit starts an asynchronous Fun-ASR task with automatic speaker estimation.
@@ -114,8 +114,8 @@ func (c *Client) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 	body := submitRequest{
 		Model: c.model,
-		Input: map[string]interface{}{"file_urls": []string{fileURL}},
-		Parameters: map[string]interface{}{
+		Input: map[string]any{"file_urls": []string{fileURL}},
+		Parameters: map[string]any{
 			"diarization_enabled": true,
 		},
 	}
