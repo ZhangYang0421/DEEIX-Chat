@@ -32,12 +32,12 @@ func parseAllowedMIMETypes(raw string) map[string]struct{} {
 }
 
 type chatFileCapability struct {
-	RAGAvailable            bool
-	RAGAvailabilityReason   string
-	CapabilityMode          string
-	EffectiveImageMaxBytes  int64
-	EffectiveDocMaxBytes    int64
-	EffectiveAudioMaxBytes  int64
+	RAGAvailable           bool
+	RAGAvailabilityReason  string
+	CapabilityMode         string
+	EffectiveImageMaxBytes int64
+	EffectiveDocMaxBytes   int64
+	EffectiveAudioMaxBytes int64
 }
 
 func minPositiveInt64(values ...int64) int64 {

@@ -152,17 +152,17 @@ func (s *Service) submitAudio(ctx context.Context, store objectstore.Store, file
 	payload.TaskID = strings.TrimSpace(result.TaskID)
 	payload.TaskStatus = "PENDING"
 	if err = s.repo.UpdateFileObjectProcessingState(ctx, &domainconversation.FileObjectProcessing{
-		FileObjectID:       fileObj.ID,
-		UserID:             fileObj.UserID,
-		DetectedMIME:       fileObj.DetectedMIME,
-		FileCategory:       fileObj.FileCategory,
-		ProcessingStatus:   "transcribing",
-		ExtractStatus:      "processing",
-		ExtractEngine:      audioProcessingEngine,
-		RAGReady:           false,
-		RAGReason:          "transcription_pending",
-		PayloadJSON:        string(mustMarshalAudioPayload(payload)),
-		StartedAt:          &now,
+		FileObjectID:     fileObj.ID,
+		UserID:           fileObj.UserID,
+		DetectedMIME:     fileObj.DetectedMIME,
+		FileCategory:     fileObj.FileCategory,
+		ProcessingStatus: "transcribing",
+		ExtractStatus:    "processing",
+		ExtractEngine:    audioProcessingEngine,
+		RAGReady:         false,
+		RAGReason:        "transcription_pending",
+		PayloadJSON:      string(mustMarshalAudioPayload(payload)),
+		StartedAt:        &now,
 	}); err != nil {
 		return err
 	}

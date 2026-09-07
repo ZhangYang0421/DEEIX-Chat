@@ -235,13 +235,19 @@ func (h *Handler) RetryAudioTranscription(c *gin.Context) {
 func (h *Handler) GetFileTranscript(c *gin.Context) {
 	userID := middleware.MustUserID(c)
 	fileID := strings.TrimSpace(c.Param("file_id"))
-	if fileID == "" { response.Error(c, http.StatusBadRequest, "invalid file id"); return }
+	if fileID == "" {
+		response.Error(c, http.StatusBadRequest, "invalid file id")
+		return
+	}
 	result, err := h.service.GetFileTranscript(c.Request.Context(), userID, fileID)
 	if err != nil {
 		switch {
-		case errors.Is(err, appconversation.ErrFileNotFound): response.Error(c, http.StatusNotFound, "file not found")
-		case errors.Is(err, appconversation.ErrFileProcessingNotReady): response.ErrorWithCode(c, http.StatusConflict, "transcript_not_ready", "transcript not ready")
-		default: response.Error(c, http.StatusInternalServerError, "get transcript failed")
+		case errors.Is(err, appconversation.ErrFileNotFound):
+			response.Error(c, http.StatusNotFound, "file not found")
+		case errors.Is(err, appconversation.ErrFileProcessingNotReady):
+			response.ErrorWithCode(c, http.StatusConflict, "transcript_not_ready", "transcript not ready")
+		default:
+			response.Error(c, http.StatusInternalServerError, "get transcript failed")
 		}
 		return
 	}
@@ -252,18 +258,30 @@ func (h *Handler) GetFileTranscript(c *gin.Context) {
 func (h *Handler) PatchFileTranscript(c *gin.Context) {
 	userID := middleware.MustUserID(c)
 	fileID := strings.TrimSpace(c.Param("file_id"))
-	if fileID == "" { response.Error(c, http.StatusBadRequest, "invalid file id"); return }
+	if fileID == "" {
+		response.Error(c, http.StatusBadRequest, "invalid file id")
+		return
+	}
 	var req PatchFileTranscriptRequest
-	if err := c.ShouldBindJSON(&req); err != nil { response.InvalidRequestBody(c, err); return }
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.InvalidRequestBody(c, err)
+		return
+	}
 	patch := appconversation.TranscriptPatch{Revision: req.Revision, SpeakerNames: req.SpeakerNames, SpeakerOverrides: req.SpeakerOverrides}
-	for _, segment := range req.Segments { patch.Segments = append(patch.Segments, appconversation.TranscriptSegmentPatch{SegmentID:segment.SegmentID, Text:segment.Text}) }
+	for _, segment := range req.Segments {
+		patch.Segments = append(patch.Segments, appconversation.TranscriptSegmentPatch{SegmentID: segment.SegmentID, Text: segment.Text})
+	}
 	result, err := h.service.PatchFileTranscript(c.Request.Context(), userID, fileID, patch)
 	if err != nil {
 		switch {
-		case errors.Is(err, appconversation.ErrFileNotFound): response.Error(c, http.StatusNotFound, "file not found")
-		case errors.Is(err, appconversation.ErrTranscriptRevisionConflict): response.ErrorWithCode(c, http.StatusConflict, "transcript_revision_conflict", "transcript revision conflict")
-		case errors.Is(err, appconversation.ErrTranscriptInvalidEdit): response.ErrorWithCode(c, http.StatusBadRequest, "invalid_transcript_edit", "invalid transcript edit")
-		default: response.Error(c, http.StatusInternalServerError, "patch transcript failed")
+		case errors.Is(err, appconversation.ErrFileNotFound):
+			response.Error(c, http.StatusNotFound, "file not found")
+		case errors.Is(err, appconversation.ErrTranscriptRevisionConflict):
+			response.ErrorWithCode(c, http.StatusConflict, "transcript_revision_conflict", "transcript revision conflict")
+		case errors.Is(err, appconversation.ErrTranscriptInvalidEdit):
+			response.ErrorWithCode(c, http.StatusBadRequest, "invalid_transcript_edit", "invalid transcript edit")
+		default:
+			response.Error(c, http.StatusInternalServerError, "patch transcript failed")
 		}
 		return
 	}

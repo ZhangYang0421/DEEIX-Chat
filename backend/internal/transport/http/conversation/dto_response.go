@@ -1431,8 +1431,8 @@ func toFileProcessingStatusResponse(d *appprocessing.FileProcessingStatusDTO) Fi
 
 // TranscriptResponse 结构化录音转写响应。
 type TranscriptResponse struct {
-	FileID       string                    `json:"fileID"`
-	Document     funasr.TranscriptDocument `json:"document"`
+	FileID   string                    `json:"fileID"`
+	Document funasr.TranscriptDocument `json:"document"`
 }
 
 func toTranscriptResponse(result *appconversation.TranscriptResult) TranscriptResponse {

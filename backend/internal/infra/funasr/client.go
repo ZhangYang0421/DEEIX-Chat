@@ -87,13 +87,13 @@ type SubmitResult struct {
 }
 
 type TaskStatus struct {
-	TaskID            string
-	Status            string
-	TranscriptionURL  string
-	Message           string
-	Raw               json.RawMessage
-	Terminal          bool
-	Succeeded         bool
+	TaskID           string
+	Status           string
+	TranscriptionURL string
+	Message          string
+	Raw              json.RawMessage
+	Terminal         bool
+	Succeeded        bool
 }
 
 type submitRequest struct {
@@ -139,9 +139,11 @@ func (c *Client) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	}
 	var envelope struct {
 		RequestID string `json:"request_id"`
-		Output    struct { TaskID string `json:"task_id"` } `json:"output"`
-		Code      string `json:"code"`
-		Message   string `json:"message"`
+		Output    struct {
+			TaskID string `json:"task_id"`
+		} `json:"output"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(respBody, &envelope); err != nil {
 		return nil, fmt.Errorf("fun-asr submit decode: %w", err)
@@ -193,11 +195,11 @@ func (c *Client) GetTask(ctx context.Context, taskID string) (*TaskStatus, error
 		return nil, fmt.Errorf("fun-asr task failed: %s %s", envelope.Code, envelope.Message)
 	}
 	out := &TaskStatus{
-		TaskID:   firstNonEmpty(envelope.Output.TaskID, taskID),
-		Status:   status,
-		Message:  firstNonEmpty(envelope.Output.Message, envelope.Message),
-		Raw:      respBody,
-		Terminal: isTerminal(status),
+		TaskID:    firstNonEmpty(envelope.Output.TaskID, taskID),
+		Status:    status,
+		Message:   firstNonEmpty(envelope.Output.Message, envelope.Message),
+		Raw:       respBody,
+		Terminal:  isTerminal(status),
 		Succeeded: status == "SUCCEEDED",
 	}
 	if out.Succeeded {

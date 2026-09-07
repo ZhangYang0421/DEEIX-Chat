@@ -224,7 +224,8 @@ func (s *Service) UploadFile(ctx context.Context, input UploadFileInput) (*Uploa
 	}
 
 	cfg := s.snapshot()
-	if input.DeclaredSize > 0 && input.DeclaredSize > maxUploadBytesForInput(normalizedName, normalizedMIME, cfg) {
+	maxUploadBytes := maxUploadBytesForInput(normalizedName, normalizedMIME, cfg)
+	if input.DeclaredSize > 0 && input.DeclaredSize > maxUploadBytes {
 		return nil, s.errFileTooLarge()
 	}
 
@@ -272,7 +273,7 @@ func (s *Service) UploadFile(ctx context.Context, input UploadFileInput) (*Uploa
 	}
 	ext := strings.ToLower(filepath.Ext(normalizedName))
 	if (ext == ".mp3" || ext == ".m4a") && category != fileCategoryAudio {
-		logRemoveErr(relativePath, store.Delete(ctx, relativePath))
+		removeUploadedObject(relativePath)
 		return nil, s.errMIMEBlocked()
 	}
 

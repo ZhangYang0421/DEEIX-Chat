@@ -500,15 +500,9 @@ func (s *Service) processClaimedFile(ctx context.Context, fileObj domainconversa
 		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, "failed", err)
 		return err
 	}
-	if strings.TrimSpace(text) == "" {
+	if len(chunks) == 0 {
 		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, "failed", errNoExtractableText)
 		return fmt.Errorf("%w %s", errNoExtractableText, fileObj.FileID)
-	}
-
-	chunks := embeddingutil.ChunkText(text, cfg.EmbedChunkSizeTokens, cfg.EmbedChunkOverlapTokens)
-	if len(chunks) == 0 {
-		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, "failed", errEmptyChunks)
-		return errEmptyChunks
 	}
 
 	embeddings, err := s.embedTextsWithConfig(ctx, chunks, cfg)

@@ -11,30 +11,30 @@ import (
 
 // Segment is one normalized transcript sentence.
 type Segment struct {
-	SegmentID    string  `json:"segmentID"`
-	StartMs      int64   `json:"startMs"`
-	EndMs        int64   `json:"endMs"`
-	SpeakerID    *int    `json:"speakerID"`
-	Text         string  `json:"text"`
-	OriginalText string  `json:"originalText"`
+	SegmentID     string  `json:"segmentID"`
+	StartMs       int64   `json:"startMs"`
+	EndMs         int64   `json:"endMs"`
+	SpeakerID     *int    `json:"speakerID"`
+	Text          string  `json:"text"`
+	OriginalText  string  `json:"originalText"`
 	AvgConfidence float64 `json:"avgConfidence,omitempty"`
-	LowConfidence bool   `json:"lowConfidence,omitempty"`
-	Edited       bool    `json:"edited,omitempty"`
+	LowConfidence bool    `json:"lowConfidence,omitempty"`
+	Edited        bool    `json:"edited,omitempty"`
 }
 
 // TranscriptDocument is the editable structured transcript stored as transcript.json.
 type TranscriptDocument struct {
-	Version      int               `json:"version"`
-	Revision     int               `json:"revision"`
-	Source       string            `json:"source"`
-	Model        string            `json:"model"`
-	FileID       string            `json:"fileID,omitempty"`
-	FileName     string            `json:"fileName,omitempty"`
-	DurationMs   *int64            `json:"durationMs,omitempty"`
+	Version          int               `json:"version"`
+	Revision         int               `json:"revision"`
+	Source           string            `json:"source"`
+	Model            string            `json:"model"`
+	FileID           string            `json:"fileID,omitempty"`
+	FileName         string            `json:"fileName,omitempty"`
+	DurationMs       *int64            `json:"durationMs,omitempty"`
 	SpeakerNames     map[string]string `json:"speakerNames"`
 	SpeakerOverrides map[string]string `json:"speakerOverrides,omitempty"`
 	Segments         []Segment         `json:"segments"`
-	UpdatedAt    string            `json:"updatedAt,omitempty"`
+	UpdatedAt        string            `json:"updatedAt,omitempty"`
 }
 
 // NormalizeRaw converts a Fun-ASR result.raw.json payload into a TranscriptDocument.

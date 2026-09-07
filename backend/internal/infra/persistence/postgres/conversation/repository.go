@@ -9,9 +9,12 @@ import (
 	"time"
 
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
+	domainknowledgebase "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/knowledgebase"
 	domainuser "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/dberror"
 	models "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/sqlitevec"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/vectorutil"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -3141,10 +3144,7 @@ func (r *Repo) GetUpstreamByID(ctx context.Context, upstreamID uint) (*models.LL
 	return &item, nil
 }
 
-
-
-
-func deleteSQLiteFileChunkVectorsByFile(tx *gorm.DB, fileObjID uint) error {
+func legacyDeleteSQLiteFileChunkVectorsByFile(tx *gorm.DB, fileObjID uint) error {
 	return dberror.Translate(tx.Exec(
 		fmt.Sprintf(`DELETE FROM %s WHERE chunk_id IN (
 			SELECT id FROM "file_chunks" WHERE file_obj_id = ?
@@ -3153,7 +3153,7 @@ func deleteSQLiteFileChunkVectorsByFile(tx *gorm.DB, fileObjID uint) error {
 	).Error)
 }
 
-func insertSQLiteFileChunkVectors(tx *gorm.DB, entities []models.FileChunk, embeddings [][]float32) error {
+func legacyInsertSQLiteFileChunkVectors(tx *gorm.DB, entities []models.FileChunk, embeddings [][]float32) error {
 	if len(entities) != len(embeddings) {
 		return fmt.Errorf("embedding count mismatch: chunks=%d embeddings=%d", len(entities), len(embeddings))
 	}
@@ -3492,7 +3492,6 @@ func (r *Repo) keywordSearchFileChunks(ctx context.Context, userID uint, fileObj
 	}
 	return results, nil
 }
-
 
 // GetUserSettingValue 查询指定用户的单个配置值，不存在时返回 ""。
 func (r *Repo) GetUserSettingValue(ctx context.Context, userID uint, key string) (string, error) {
@@ -4333,7 +4332,7 @@ func toContextSnapshotModel(item *domainconversation.ContextSnapshot) models.Cha
 		Strategy:              item.Strategy,
 	}
 }
-func toFileObjectDomain(item models.FileObject) domainconversation.FileObject {
+func legacyToFileObjectDomain(item models.FileObject) domainconversation.FileObject {
 	return domainconversation.FileObject{
 		ID:                     item.ID,
 		FileID:                 item.FileID,
@@ -4378,7 +4377,7 @@ func toFileObjectDomain(item models.FileObject) domainconversation.FileObject {
 	}
 }
 
-func toFileObjectDomains(items []models.FileObject) []domainconversation.FileObject {
+func legacyToFileObjectDomains(items []models.FileObject) []domainconversation.FileObject {
 	results := make([]domainconversation.FileObject, 0, len(items))
 	for _, item := range items {
 		results = append(results, toFileObjectDomain(item))
@@ -4386,7 +4385,7 @@ func toFileObjectDomains(items []models.FileObject) []domainconversation.FileObj
 	return results
 }
 
-func toFileObjectModel(item *domainconversation.FileObject) models.FileObject {
+func legacyToFileObjectModel(item *domainconversation.FileObject) models.FileObject {
 	if item == nil {
 		return models.FileObject{}
 	}
@@ -4432,7 +4431,7 @@ func toFileObjectModel(item *domainconversation.FileObject) models.FileObject {
 	}
 }
 
-func toStorageQuotaDomain(item models.UserStorageQuota) domainconversation.StorageQuota {
+func legacyToStorageQuotaDomain(item models.UserStorageQuota) domainconversation.StorageQuota {
 	return domainconversation.StorageQuota{
 		ID:            item.ID,
 		UserID:        item.UserID,
@@ -4444,7 +4443,7 @@ func toStorageQuotaDomain(item models.UserStorageQuota) domainconversation.Stora
 	}
 }
 
-func toFileChunkModel(item *domainconversation.FileChunk) models.FileChunk {
+func legacyToFileChunkModel(item *domainconversation.FileChunk) models.FileChunk {
 	if item == nil {
 		return models.FileChunk{}
 	}
@@ -4461,7 +4460,7 @@ func toFileChunkModel(item *domainconversation.FileChunk) models.FileChunk {
 	}
 }
 
-func toFileObjectProcessingStateDomain(item models.FileObject) domainconversation.FileObjectProcessing {
+func legacyToFileObjectProcessingStateDomain(item models.FileObject) domainconversation.FileObjectProcessing {
 	return domainconversation.FileObjectProcessing{
 		ID:                 item.ID,
 		FileObjectID:       item.ID,
@@ -4492,7 +4491,7 @@ func toFileObjectProcessingStateDomain(item models.FileObject) domainconversatio
 	}
 }
 
-func fileObjectProcessingStateUpdates(item *domainconversation.FileObjectProcessing) map[string]any {
+func legacyFileObjectProcessingStateUpdates(item *domainconversation.FileObjectProcessing) map[string]any {
 	if item == nil {
 		return map[string]any{}
 	}

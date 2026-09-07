@@ -262,6 +262,25 @@ func resolveOCRHealthURL(baseURL string) string {
 	return baseURL + rapidOCRHealthEndpoint
 }
 
+func applyPaddleAuthHeader(req *http.Request, authToken string) {
+	if req == nil {
+		return
+	}
+	token := strings.TrimSpace(authToken)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 // ExtractText 对文档或图片做 OCR，返回识别文本。
 func (c *Client) ExtractText(ctx context.Context, req Request) (Response, error) {
 	if strings.TrimSpace(req.AbsolutePath) == "" {

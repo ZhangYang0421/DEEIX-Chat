@@ -862,7 +862,7 @@ func (s *Service) handleProcessingMessage(ctx context.Context, consumerName stri
 					)
 				}
 				return
-		}
+			}
 		} else {
 			if finalizeErr := s.forceFinalizeFailed(ctx, msg.UserID, msg.FileID, attemptID, err); finalizeErr != nil {
 				if s.logger != nil {
