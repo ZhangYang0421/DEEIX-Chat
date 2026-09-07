@@ -63,6 +63,10 @@ func (*processingStateRepositoryStub) CompareAndSwapTranscriptRevision(context.C
 	return true, nil
 }
 
+func (*processingStateRepositoryStub) SetTranscriptRevisionIfExpected(context.Context, uint, string, int, int) (bool, error) {
+	return true, nil
+}
+
 func (*processingStateRepositoryStub) UpdateFileObjectProcessing(context.Context, uint, string, repository.UpdateFileObjectProcessingInput) error {
 	return nil
 }

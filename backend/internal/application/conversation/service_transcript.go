@@ -94,7 +94,7 @@ func (s *Service) PatchFileTranscript(ctx context.Context, userID uint, fileID s
 	persisted := false
 	defer func() {
 		if !persisted {
-			_, _ = s.repo.CompareAndSwapTranscriptRevision(context.WithoutCancel(ctx), userID, normalizedFileID, patch.Revision+1)
+			_, _ = s.repo.SetTranscriptRevisionIfExpected(context.WithoutCancel(ctx), userID, normalizedFileID, patch.Revision+1, patch.Revision)
 		}
 	}()
 
@@ -116,6 +116,16 @@ func (s *Service) PatchFileTranscript(ctx context.Context, userID uint, fileID s
 	segments := make(map[string]*portfunasr.Segment, len(result.Document.Segments))
 	for i := range result.Document.Segments {
 		segments[result.Document.Segments[i].SegmentID] = &result.Document.Segments[i]
+	}
+	for _, segmentPatch := range patch.Segments {
+		segmentID := strings.TrimSpace(segmentPatch.SegmentID)
+		segment := segments[segmentID]
+		text := strings.TrimSpace(segmentPatch.Text)
+		if segment == nil || text == "" || len([]rune(text)) > 20000 {
+			return nil, ErrTranscriptInvalidEdit
+		}
+		segment.Text = text
+		segment.Edited = true
 	}
 	for segmentID, speakerKey := range patch.SpeakerOverrides {
 		segmentID = strings.TrimSpace(segmentID)

@@ -115,6 +115,37 @@ func (r *Repo) CompareAndSwapTranscriptRevision(ctx context.Context, userID uint
 	return result.RowsAffected == 1, nil
 }
 
+func (r *Repo) SetTranscriptRevisionIfExpected(ctx context.Context, userID uint, fileID string, expectedRevision int, targetRevision int) (bool, error) {
+	if userID == 0 || fileID == "" || expectedRevision < 1 || targetRevision < 1 {
+		return false, nil
+	}
+	const processingPayloadColumn = "processing_payload_json"
+	whereRevision := "COALESCE((processing_payload_json::jsonb ->> 'transcriptRevision')::int, 1) = ?"
+	updatedPayload := gorm.Expr(
+		"jsonb_set(COALESCE(NULLIF(processing_payload_json, ''), '{}')::jsonb, '{transcriptRevision}', to_jsonb(?::int), true)::text",
+		targetRevision,
+	)
+	if r.sqliteDialect() {
+		whereRevision = "COALESCE(CAST(json_extract(processing_payload_json, '$.transcriptRevision') AS INTEGER), 1) = ?"
+		updatedPayload = gorm.Expr(
+			"json_set(CASE WHEN NULLIF(processing_payload_json, '') IS NULL THEN '{}' ELSE processing_payload_json END, '$.transcriptRevision', ?)",
+			targetRevision,
+		)
+	}
+	result := r.db.WithContext(ctx).
+		Model(&models.FileObject{}).
+		Where("user_id = ? AND file_id = ? AND status = ? AND file_category = ?", userID, fileID, "active", "audio").
+		Where(whereRevision, expectedRevision).
+		Updates(map[string]any{
+			processingPayloadColumn: updatedPayload,
+			"updated_at":            time.Now(),
+		})
+	if result.Error != nil {
+		return false, translateError(result.Error)
+	}
+	return result.RowsAffected == 1, nil
+}
+
 func (r *Repo) CloneFileObjectProcessingState(ctx context.Context, sourceFileObjID uint, targetFileObjID uint, userID uint) error {
 	if sourceFileObjID == 0 || targetFileObjID == 0 {
 		return nil

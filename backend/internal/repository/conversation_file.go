@@ -109,6 +109,7 @@ type FileProcessingRepository interface {
 	GetFileObjectProcessingByObjectID(ctx context.Context, fileObjID uint) (*domainconversation.FileObjectProcessing, error)
 	ListRecoverableAudioFileObjects(ctx context.Context, limit int) ([]domainconversation.FileObject, error)
 	CompareAndSwapTranscriptRevision(ctx context.Context, userID uint, fileID string, expectedRevision int) (bool, error)
+	SetTranscriptRevisionIfExpected(ctx context.Context, userID uint, fileID string, expectedRevision int, targetRevision int) (bool, error)
 	CloneFileObjectProcessingState(ctx context.Context, sourceFileObjID uint, targetFileObjID uint, userID uint) error
 	UpdateFileObjectProcessing(ctx context.Context, userID uint, fileID string, input UpdateFileObjectProcessingInput) error
 	TryClaimFileObjectProcessing(ctx context.Context, userID uint, fileID string, allowRecovery bool, extractorVersion string, attemptID string) (bool, error)

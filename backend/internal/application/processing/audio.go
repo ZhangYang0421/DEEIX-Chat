@@ -227,7 +227,7 @@ func (s *Service) pollAudio(ctx context.Context, store objectstore.Store, fileOb
 	payload.RawResultPath = basePath + "/result.raw.json"
 	payload.TranscriptJSONPath = basePath + "/transcript.json"
 	payload.TranscriptMDPath = basePath + "/transcript.md"
-	if err = putAudioArtifact(ctx, store, payload.RawResultPath, rawResult, "application/json"); err != nil {
+	if err = putAudioArtifactImmutable(ctx, store, payload.RawResultPath, rawResult, "application/json"); err != nil {
 		return s.failAudio(ctx, fileObj, "transcription_storage_failed", "录音转写结果保存失败，请手动重试")
 	}
 	if err = putAudioArtifact(ctx, store, payload.TranscriptJSONPath, transcriptJSON, "application/json"); err != nil {
@@ -331,14 +331,20 @@ func (s *Service) failAudio(ctx context.Context, fileObj *domainconversation.Fil
 }
 
 func (s *Service) scheduleAudioPoll(ctx context.Context, userID uint, fileID string) {
+	scheduleCtx := ctx
+	if s != nil && s.workerContext != nil {
+		scheduleCtx = s.workerContext
+	} else {
+		scheduleCtx = context.WithoutCancel(ctx)
+	}
 	go func() {
 		timer := time.NewTimer(audioPollDelay)
 		defer timer.Stop()
 		select {
-		case <-ctx.Done():
+		case <-scheduleCtx.Done():
 			return
 		case <-timer.C:
-			if err := s.enqueueFileProcessing(context.WithoutCancel(ctx), userID, fileID, 0, ""); err != nil && s.logger != nil {
+			if err := s.enqueueFileProcessing(scheduleCtx, userID, fileID, 0, ""); err != nil && s.logger != nil {
 				s.logger.Warn("enqueue_audio_poll_failed", zap.Uint("user_id", userID), zap.String("file_id", fileID), zap.Error(err))
 			}
 		}
@@ -380,6 +386,18 @@ func mustMarshalAudioPayload(payload audioProcessingPayload) []byte {
 func putAudioArtifact(ctx context.Context, store objectstore.Store, path string, data []byte, contentType string) error {
 	_, err := store.Put(ctx, path, bytes.NewReader(data), objectstore.PutOptions{SizeBytes: int64(len(data)), ContentType: contentType})
 	return err
+}
+
+func putAudioArtifactImmutable(ctx context.Context, store objectstore.Store, path string, data []byte, contentType string) error {
+	reader, _, err := store.Open(ctx, path)
+	if err == nil {
+		_ = reader.Close()
+		return nil
+	}
+	if !errors.Is(err, objectstore.ErrNotFound) {
+		return err
+	}
+	return putAudioArtifact(ctx, store, path, data, contentType)
 }
 
 func audioErrorCode(err error) string {

@@ -102,6 +102,7 @@ type Service struct {
 	funASRCodec      portfunasr.Codec
 	logger           *zap.Logger
 	extractorVersion string
+	workerContext    context.Context
 	// fallbackSlots 是无队列缓存降级模式下的并发信号量，防止处理 goroutine 无界增长。
 	fallbackSlots chan struct{}
 }
@@ -168,6 +169,7 @@ func (s *Service) StartBackgroundWorkers(ctx context.Context) {
 	if s == nil || s.cache == nil {
 		return
 	}
+	s.workerContext = ctx
 	consumerName := "worker-" + fmt.Sprintf("%d", time.Now().UnixNano())
 	if err := s.cache.InitFileProcessingStream(ctx); err != nil && s.logger != nil {
 		s.logger.Warn("create_file_processing_group_failed", zap.Error(err))

@@ -25,5 +25,6 @@ type ConversationRepository interface {
 	// 文件处理状态只在读取附件状态、复制分享文件和保存音频转写修订时用到这些能力。
 	GetFileObjectProcessingByObjectID(ctx context.Context, fileObjID uint) (*domainconversation.FileObjectProcessing, error)
 	CompareAndSwapTranscriptRevision(ctx context.Context, userID uint, fileID string, expectedRevision int) (bool, error)
+	SetTranscriptRevisionIfExpected(ctx context.Context, userID uint, fileID string, expectedRevision int, targetRevision int) (bool, error)
 	CloneFileObjectProcessingState(ctx context.Context, sourceFileObjID uint, targetFileObjID uint, userID uint) error
 }

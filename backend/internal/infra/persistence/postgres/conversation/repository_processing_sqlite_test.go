@@ -64,4 +64,18 @@ func TestCompareAndSwapTranscriptRevisionSQLite(t *testing.T) {
 	if locked {
 		t.Fatal("expected stale revision compare-and-swap to fail")
 	}
+
+	restored, err := repo.SetTranscriptRevisionIfExpected(context.Background(), 1, file.FileID, 2, 1)
+	if err != nil {
+		t.Fatalf("restore transcript revision: %v", err)
+	}
+	if !restored {
+		t.Fatal("expected revision restore to succeed")
+	}
+
+	if restored, err = repo.SetTranscriptRevisionIfExpected(context.Background(), 1, file.FileID, 2, 1); err != nil {
+		t.Fatalf("stale revision restore: %v", err)
+	} else if restored {
+		t.Fatal("expected stale revision restore to fail")
+	}
 }
