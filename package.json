@@ -13,6 +13,9 @@
     "dev:api": "turbo run dev --filter=@deeix/api",
     "dev:web": "turbo run dev --filter=@deeix/web",
     "test": "turbo run test",
+    "upstream:impact": "node scripts/upstream-impact.mjs",
+    "upstream:check": "node scripts/upstream-impact.mjs --no-fetch --run-checks",
+    "upstream:baseline": "node scripts/upstream-impact.mjs --no-fetch --set-baseline",
     "verify": "turbo run check test build"
   },
   "devDependencies": {
