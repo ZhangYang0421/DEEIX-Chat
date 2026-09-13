@@ -79,10 +79,10 @@ type EmbeddingRepository interface {
 	GetActiveFileObjectsByIDs(ctx context.Context, userID uint, fileIDs []string) ([]domainconversation.FileObject, error)
 	GetFileObjectProcessingByObjectID(ctx context.Context, fileObjID uint) (*domainconversation.FileObjectProcessing, error)
 	QueueFileEmbedding(ctx context.Context, userID uint, fileID string, embeddingSignature string) (bool, error)
-	ClaimFileEmbedding(ctx context.Context, userID uint, fileID string, embeddingSignature string) (bool, error)
-	UpdateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, embeddingSignature string, status string, embedErr string) (bool, error)
-	UpdateFileObjectChunkCount(ctx context.Context, fileObjID uint, embeddingSignature string, chunkCount int) (bool, error)
-	ReplaceFileChunks(ctx context.Context, fileObjID uint, embeddingSignature string, chunks []domainconversation.FileChunk, embeddings [][]float32) (bool, error)
+	ClaimFileEmbedding(ctx context.Context, userID uint, fileID string, embeddingSignature string, expectedTranscriptRevision int) (bool, error)
+	UpdateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, embeddingSignature string, status string, embedErr string, expectedTranscriptRevision int) (bool, error)
+	UpdateFileObjectChunkCount(ctx context.Context, fileObjID uint, embeddingSignature string, chunkCount int, expectedTranscriptRevision int) (bool, error)
+	ReplaceFileChunks(ctx context.Context, fileObjID uint, embeddingSignature string, chunks []domainconversation.FileChunk, embeddings [][]float32, expectedTranscriptRevision int) (bool, error)
 	// MarkEmbeddedFilesStale 将缺少当前向量空间签名分片的 queued/processing/ready 文件标记为 stale。
 	// 在 Embedding 配置变更及服务启动时调用，使旧向量失效并等待重建。
 	// 返回被标记的文件数量。
@@ -108,12 +108,20 @@ type FileProcessingRepository interface {
 	UpdateClaimedFileObjectProcessingState(ctx context.Context, item *domainconversation.FileObjectProcessing, attemptID string) (bool, error)
 	GetFileObjectProcessingByObjectID(ctx context.Context, fileObjID uint) (*domainconversation.FileObjectProcessing, error)
 	ListRecoverableAudioFileObjects(ctx context.Context, limit int) ([]domainconversation.FileObject, error)
-	CompareAndSwapTranscriptRevision(ctx context.Context, userID uint, fileID string, expectedRevision int) (bool, error)
-	SetTranscriptRevisionIfExpected(ctx context.Context, userID uint, fileID string, expectedRevision int, targetRevision int) (bool, error)
 	CloneFileObjectProcessingState(ctx context.Context, sourceFileObjID uint, targetFileObjID uint, userID uint) error
 	UpdateFileObjectProcessing(ctx context.Context, userID uint, fileID string, input UpdateFileObjectProcessingInput) error
 	TryClaimFileObjectProcessing(ctx context.Context, userID uint, fileID string, allowRecovery bool, extractorVersion string, attemptID string) (bool, error)
 	ResetFileObjectProcessingForRetry(ctx context.Context, userID uint, fileID string, attemptID string) (bool, error)
+}
+
+// PublishTranscriptRevisionInput 定义一次不可变 transcript 修订的原子发布内容。
+type PublishTranscriptRevisionInput struct {
+	ExpectedRevision   int
+	Revision           int
+	TranscriptJSONPath string
+	TranscriptMDPath   string
+	ExtractChars       int
+	PreviewText        string
 }
 
 // UpdateFileObjectProcessingInput 定义文件处理状态更新字段。

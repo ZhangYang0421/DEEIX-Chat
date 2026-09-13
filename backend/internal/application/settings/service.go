@@ -3,7 +3,6 @@ package settings
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -475,7 +474,9 @@ func (s *Service) validateFileProcessingSettings(ctx context.Context, patches []
 			})
 		}
 		if strings.TrimSpace(next["extract:paddle_ocr_auth_token"]) == "" {
-			return fmt.Errorf("extract:paddle_ocr_auth_token is required when OCR engine is paddle")
+			return newSettingValidationError(settingCodeExtractInvalid, SettingValidationDetails{
+				Field: "extract:paddle_ocr_auth_token", Rule: "required_when", Param: "extract:ocr_engine=paddle",
+			})
 		}
 	case extraction.OCREngineTencent:
 		if strings.TrimSpace(next["extract:tencent_ocr_secret_id"]) == "" {

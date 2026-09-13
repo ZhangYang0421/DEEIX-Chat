@@ -103,10 +103,12 @@ type TargetedSubmissionResult struct {
 }
 
 type TargetedJob struct {
-	FileID             string
-	UserID             uint
-	EmbeddingSignature string
-	EmbeddingHost      string
+	FileID                  string
+	UserID                  uint
+	EmbeddingSignature      string
+	EmbeddingHost           string
+	TranscriptRevision      int
+	TranscriptRevisionKnown bool
 }
 
 type TargetedSubmissionPlan struct {
@@ -322,10 +324,12 @@ func (s *Service) PlanFiles(ctx context.Context, userID uint, fileIDs []string) 
 		}
 
 		plan.Jobs = append(plan.Jobs, TargetedJob{
-			FileID:             fileID,
-			UserID:             userID,
-			EmbeddingSignature: embeddingSignature,
-			EmbeddingHost:      embeddingHost,
+			FileID:                  fileID,
+			UserID:                  userID,
+			EmbeddingSignature:      embeddingSignature,
+			EmbeddingHost:           embeddingHost,
+			TranscriptRevision:      transcriptRevisionForChunkPublication(fileObj),
+			TranscriptRevisionKnown: true,
 		})
 	}
 	return plan, nil
@@ -339,6 +343,7 @@ func (s *Service) QueueTargetedJob(ctx context.Context, job TargetedJob) (bool, 
 	}
 	return s.repo.QueueFileEmbedding(ctx, job.UserID, job.FileID, job.EmbeddingSignature)
 }
+
 
 // ResolveFileVectorizationCapabilities 返回前端展示所需的后端事实状态。
 func (s *Service) ResolveFileVectorizationCapabilities(
@@ -372,7 +377,6 @@ func (s *Service) ResolveFileVectorizationCapabilities(
 	}
 	return capabilities
 }
-
 // ProcessTargetedJob 执行从可恢复队列中领取的显式向量化任务。
 func (s *Service) ProcessTargetedJob(ctx context.Context, job TargetedJob) error {
 	if s == nil || s.repo == nil || strings.TrimSpace(job.FileID) == "" {
@@ -384,43 +388,79 @@ func (s *Service) ProcessTargetedJob(ctx context.Context, job TargetedJob) error
 	}
 	defer releaseSlot()
 
+	fileObj, err := s.repo.GetActiveFileObjectByID(ctx, job.UserID, job.FileID)
+	if err != nil || fileObj == nil {
+		return err
+	}
+	expectedTranscriptRevision := transcriptRevisionForChunkPublication(*fileObj)
+	if job.TranscriptRevision > 0 {
+		if expectedTranscriptRevision != job.TranscriptRevision {
+			return nil
+		}
+		expectedTranscriptRevision = job.TranscriptRevision
+	}
+
 	cfg := s.snapshot()
 	if configuredModelSignature(cfg) != strings.TrimSpace(job.EmbeddingSignature) ||
 		strings.TrimRight(strings.TrimSpace(cfg.EmbeddingHost), "/") != strings.TrimRight(strings.TrimSpace(job.EmbeddingHost), "/") {
-		_ = s.updateFileObjectEmbedStatus(ctx, job.UserID, job.FileID, job.EmbeddingSignature, "stale", errEmbeddingConfigurationChanged)
+		_ = s.updateFileObjectEmbedStatus(ctx, job.UserID, job.FileID, job.EmbeddingSignature, "stale", errEmbeddingConfigurationChanged, expectedTranscriptRevision)
 		return nil
 	}
 	available, reason, err := s.indexingAvailable(ctx, cfg)
 	if !available {
 		switch reason {
 		case "embedding_disabled", "embedding_model_missing", "embedding_host_missing":
-			_ = s.updateFileObjectEmbedStatus(ctx, job.UserID, job.FileID, job.EmbeddingSignature, "stale", errEmbeddingConfigurationChanged)
+			_ = s.updateFileObjectEmbedStatus(ctx, job.UserID, job.FileID, job.EmbeddingSignature, "stale", errEmbeddingConfigurationChanged, expectedTranscriptRevision)
 			return nil
 		default:
 			return embeddingAvailabilityError(reason, err)
 		}
 	}
-	fileObj, err := s.repo.GetActiveFileObjectByID(ctx, job.UserID, job.FileID)
-	if err != nil || fileObj == nil {
-		return err
-	}
 	if fileObj.EmbedSignature != job.EmbeddingSignature || strings.ToLower(strings.TrimSpace(fileObj.EmbedStatus)) != "processing" {
-		claimed, claimErr := s.repo.ClaimFileEmbedding(ctx, job.UserID, job.FileID, job.EmbeddingSignature)
+		claimed, claimErr := s.repo.ClaimFileEmbedding(ctx, job.UserID, job.FileID, job.EmbeddingSignature, expectedTranscriptRevision)
 		if claimErr != nil || !claimed {
 			return claimErr
 		}
 	}
-	return s.processClaimedFile(ctx, *fileObj, cfg, job.EmbeddingSignature)
+	return s.processClaimedFile(ctx, *fileObj, cfg, job.EmbeddingSignature, expectedTranscriptRevision)
+}
+
+// ResolveTargetedJob 为未携带 revision 的旧队列消息读取当前文件快照。
+// revision 只保存在 worker 内存中，不改变既有队列消息格式。
+func (s *Service) ResolveTargetedJob(ctx context.Context, job TargetedJob) (TargetedJob, error) {
+	if job.TranscriptRevisionKnown {
+		return job, nil
+	}
+	if s == nil || s.repo == nil {
+		return job, nil
+	}
+	fileObj, err := s.repo.GetActiveFileObjectByID(ctx, job.UserID, job.FileID)
+	if err != nil {
+		return job, err
+	}
+	if fileObj != nil {
+		job.TranscriptRevision = transcriptRevisionForChunkPublication(*fileObj)
+	}
+	job.TranscriptRevisionKnown = true
+	return job, nil
 }
 
 // FailTargetedJob 将投递失败的已领取任务释放为可重试状态。
 func (s *Service) FailTargetedJob(ctx context.Context, job TargetedJob, cause error) error {
-	return s.updateFileObjectEmbedStatus(ctx, job.UserID, job.FileID, job.EmbeddingSignature, "failed", cause)
+	resolved, err := s.ResolveTargetedJob(ctx, job)
+	if err != nil {
+		return err
+	}
+	return s.updateFileObjectEmbedStatus(ctx, resolved.UserID, resolved.FileID, resolved.EmbeddingSignature, "failed", cause, resolved.TranscriptRevision)
 }
 
 // RequeueTargetedJob 将等待重试的任务恢复为排队状态，避免重试退避期间误显示为执行中或失败。
 func (s *Service) RequeueTargetedJob(ctx context.Context, job TargetedJob, cause error) error {
-	return s.updateFileObjectEmbedStatus(ctx, job.UserID, job.FileID, job.EmbeddingSignature, "queued", cause)
+	resolved, err := s.ResolveTargetedJob(ctx, job)
+	if err != nil {
+		return err
+	}
+	return s.updateFileObjectEmbedStatus(ctx, resolved.UserID, resolved.FileID, resolved.EmbeddingSignature, "queued", cause, resolved.TranscriptRevision)
 }
 
 func fileVectorizationSkipReason(cfg config.Config, fileObj domainconversation.FileObject, embeddingSignature string) string {
@@ -492,30 +532,31 @@ func (s *Service) ProcessFile(ctx context.Context, fileObj domainconversation.Fi
 	}
 	defer releaseSlot()
 
-	claimed, err := s.repo.ClaimFileEmbedding(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature)
+	expectedTranscriptRevision := transcriptRevisionForChunkPublication(fileObj)
+	claimed, err := s.repo.ClaimFileEmbedding(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, expectedTranscriptRevision)
 	if err != nil {
 		return err
 	}
 	if !claimed {
 		return nil
 	}
-	return s.processClaimedFile(ctx, fileObj, cfg, embeddingSignature)
+	return s.processClaimedFile(ctx, fileObj, cfg, embeddingSignature, expectedTranscriptRevision)
 }
 
-func (s *Service) processClaimedFile(ctx context.Context, fileObj domainconversation.FileObject, cfg config.Config, embeddingSignature string) error {
+func (s *Service) processClaimedFile(ctx context.Context, fileObj domainconversation.FileObject, cfg config.Config, embeddingSignature string, expectedTranscriptRevision int) error {
 	chunks, err := s.chunksForFile(ctx, fileObj, cfg)
 	if err != nil {
-		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, "failed", err)
+		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, "failed", err, expectedTranscriptRevision)
 		return err
 	}
 	if len(chunks) == 0 {
-		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, "failed", errNoExtractableText)
+		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, "failed", errNoExtractableText, expectedTranscriptRevision)
 		return fmt.Errorf("%w %s", errNoExtractableText, fileObj.FileID)
 	}
 
 	embeddings, err := s.embedTextsWithConfig(ctx, chunks, cfg)
 	if err != nil {
-		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, "failed", err)
+		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, "failed", err, expectedTranscriptRevision)
 		return err
 	}
 
@@ -532,21 +573,37 @@ func (s *Service) processClaimedFile(ctx context.Context, fileObj domainconversa
 			CreatedAt:          now,
 		})
 	}
-	published, err := s.repo.ReplaceFileChunks(ctx, fileObj.ID, embeddingSignature, fileChunks, embeddings)
+	published, err := s.repo.ReplaceFileChunks(ctx, fileObj.ID, embeddingSignature, fileChunks, embeddings, expectedTranscriptRevision)
 	if err != nil {
-		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, "failed", err)
+		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, "failed", err, expectedTranscriptRevision)
 		return err
 	}
 	if !published {
 		return nil
 	}
 
-	if current, countErr := s.repo.UpdateFileObjectChunkCount(ctx, fileObj.ID, embeddingSignature, len(fileChunks)); countErr != nil {
+	if current, countErr := s.repo.UpdateFileObjectChunkCount(ctx, fileObj.ID, embeddingSignature, len(fileChunks), expectedTranscriptRevision); countErr != nil {
 		return countErr
 	} else if !current {
 		return nil
 	}
-	return s.completeFileEmbedding(ctx, fileObj, embeddingSignature, cfg.EmbeddingHost)
+	return s.completeFileEmbedding(ctx, fileObj, embeddingSignature, cfg.EmbeddingHost, expectedTranscriptRevision)
+}
+
+func transcriptRevisionForChunkPublication(fileObj domainconversation.FileObject) int {
+	if !strings.EqualFold(strings.TrimSpace(fileObj.FileCategory), "audio") {
+		return 0
+	}
+	payload := struct {
+		TranscriptRevision int `json:"transcriptRevision"`
+	}{TranscriptRevision: 1}
+	if strings.TrimSpace(fileObj.ProcessingPayloadJSON) != "" {
+		_ = json.Unmarshal([]byte(fileObj.ProcessingPayloadJSON), &payload)
+	}
+	if payload.TranscriptRevision < 1 {
+		return 1
+	}
+	return payload.TranscriptRevision
 }
 
 func (s *Service) acquireWorkSlot(ctx context.Context) (func(), error) {
@@ -561,13 +618,13 @@ func (s *Service) acquireWorkSlot(ctx context.Context) (func(), error) {
 	}
 }
 
-func (s *Service) completeFileEmbedding(ctx context.Context, fileObj domainconversation.FileObject, expectedSignature string, expectedHost string) error {
+func (s *Service) completeFileEmbedding(ctx context.Context, fileObj domainconversation.FileObject, expectedSignature string, expectedHost string, expectedTranscriptRevision int) error {
 	const configurationChanged = "embedding configuration changed during processing"
 	if !s.embeddingConfigurationCurrent(expectedSignature, expectedHost) {
-		_, err := s.repo.UpdateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, expectedSignature, "stale", configurationChanged)
+		_, err := s.repo.UpdateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, expectedSignature, "stale", configurationChanged, expectedTranscriptRevision)
 		return err
 	}
-	current, err := s.repo.UpdateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, expectedSignature, "ready", "")
+	current, err := s.repo.UpdateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, expectedSignature, "ready", "", expectedTranscriptRevision)
 	if err != nil || !current {
 		return err
 	}
@@ -575,7 +632,7 @@ func (s *Service) completeFileEmbedding(ctx context.Context, fileObj domainconve
 	// the first check and publishing the ready state. A later change observes
 	// a ready file and is handled by the normal global invalidation path.
 	if !s.embeddingConfigurationCurrent(expectedSignature, expectedHost) {
-		_, err = s.repo.UpdateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, expectedSignature, "stale", configurationChanged)
+		_, err = s.repo.UpdateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, expectedSignature, "stale", configurationChanged, expectedTranscriptRevision)
 		return err
 	}
 	return nil
@@ -587,7 +644,7 @@ func (s *Service) embeddingConfigurationCurrent(expectedSignature string, expect
 		strings.TrimRight(strings.TrimSpace(cfg.EmbeddingHost), "/") == strings.TrimRight(strings.TrimSpace(expectedHost), "/")
 }
 
-func (s *Service) updateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, embeddingSignature string, status string, embedErr error) error {
+func (s *Service) updateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, embeddingSignature string, status string, embedErr error, expectedTranscriptRevision int) error {
 	if s == nil || s.repo == nil {
 		return nil
 	}
@@ -597,7 +654,7 @@ func (s *Service) updateFileObjectEmbedStatus(ctx context.Context, userID uint, 
 		writeCtx, cancel = background.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 	}
-	_, err := s.repo.UpdateFileObjectEmbedStatus(writeCtx, userID, fileID, embeddingSignature, status, ErrorSummary(embedErr))
+	_, err := s.repo.UpdateFileObjectEmbedStatus(writeCtx, userID, fileID, embeddingSignature, status, ErrorSummary(embedErr), expectedTranscriptRevision)
 	return err
 }
 

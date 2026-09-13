@@ -36,7 +36,7 @@ func TestUpdateFileObjectEmbedStatusSQLiteUpdatesRAGState(t *testing.T) {
 	}
 
 	repo := NewRepo(db)
-	if ok, err := repo.UpdateFileObjectEmbedStatus(context.Background(), 1, file.FileID, "", "ready", ""); err != nil {
+	if ok, err := repo.UpdateFileObjectEmbedStatus(context.Background(), 1, file.FileID, "", "ready", "", 1); err != nil {
 		t.Fatalf("mark embedding ready: %v", err)
 	} else if !ok {
 		t.Fatalf("mark embedding ready: no rows affected")
@@ -50,7 +50,7 @@ func TestUpdateFileObjectEmbedStatusSQLiteUpdatesRAGState(t *testing.T) {
 		t.Fatalf("ready state = (%t, %q), want (true, ready)", stored.RAGReady, stored.RAGReason)
 	}
 
-	if ok, err := repo.UpdateFileObjectEmbedStatus(context.Background(), 1, file.FileID, "", "failed", "provider error"); err != nil {
+	if ok, err := repo.UpdateFileObjectEmbedStatus(context.Background(), 1, file.FileID, "", "failed", "provider error", 1); err != nil {
 		t.Fatalf("mark embedding failed: %v", err)
 	} else if !ok {
 		t.Fatalf("mark embedding failed: no rows affected")

@@ -53,6 +53,41 @@ func (s *LocalStore) Put(ctx context.Context, key string, body io.Reader, opts P
 	return ObjectInfo{Key: normalizeKey(key), SizeBytes: written, ContentType: strings.TrimSpace(opts.ContentType), ModTime: time.Now()}, nil
 }
 
+// PutIfAbsent 通过同目录硬链接原子发布临时文件，避免覆盖已有对象或暴露半成品。
+func (s *LocalStore) PutIfAbsent(ctx context.Context, key string, body io.Reader, opts PutOptions) (ObjectInfo, error) {
+	_ = ctx
+	path, err := s.resolve(key)
+	if err != nil {
+		return ObjectInfo{}, err
+	}
+	if err = os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return ObjectInfo{}, err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return ObjectInfo{}, err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+	}()
+	written, err := io.Copy(tmp, body)
+	if err != nil {
+		return ObjectInfo{}, err
+	}
+	if err = tmp.Close(); err != nil {
+		return ObjectInfo{}, err
+	}
+	if err = os.Link(tmpName, path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return ObjectInfo{}, ErrAlreadyExists
+		}
+		return ObjectInfo{}, err
+	}
+	return ObjectInfo{Key: normalizeKey(key), SizeBytes: written, ContentType: strings.TrimSpace(opts.ContentType), ModTime: time.Now()}, nil
+}
+
 func (s *LocalStore) Open(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, error) {
 	_ = ctx
 	path, err := s.resolve(key)

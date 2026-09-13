@@ -66,7 +66,7 @@ export function TranscriptEditor({ fileID }: { fileID: string }) {
     void load();
   }, [load]);
 
-  const setSpeakerName = (speakerID: string, name: string) => {
+  const setSpeakerName = React.useCallback((speakerID: string, name: string) => {
     setDraft((current) => current ? {
       ...current,
       document: {
@@ -74,9 +74,9 @@ export function TranscriptEditor({ fileID }: { fileID: string }) {
         speakerNames: { ...current.document.speakerNames, [speakerID]: name },
       },
     } : current);
-  };
+  }, []);
 
-  const setSegmentText = (segmentID: string, text: string) => {
+  const setSegmentText = React.useCallback((segmentID: string, text: string) => {
     setDraft((current) => current ? {
       ...current,
       document: {
@@ -84,9 +84,9 @@ export function TranscriptEditor({ fileID }: { fileID: string }) {
         segments: current.document.segments.map((segment) => segment.segmentID === segmentID ? { ...segment, text } : segment),
       },
     } : current);
-  };
+  }, []);
 
-  const setSegmentSpeaker = (segmentID: string, speakerKey: string) => {
+  const setSegmentSpeaker = React.useCallback((segmentID: string, speakerKey: string) => {
     setDraft((current) => {
       if (!current) return current;
       const segment = current.document.segments.find((item) => item.segmentID === segmentID);
@@ -105,7 +105,22 @@ export function TranscriptEditor({ fileID }: { fileID: string }) {
         },
       };
     });
-  };
+  }, []);
+
+  const speakerLabel = React.useCallback((id: string) => t("speaker", { id }), [t]);
+
+  const speakerEntries = React.useMemo(() => {
+    if (!draft) return [];
+    return Object.entries(draft.document.speakerNames).sort(([left], [right]) => left.localeCompare(right));
+  }, [draft?.document.speakerNames]);
+
+  const effectiveSpeakerKeys = React.useMemo(() => {
+    if (!draft) return new Set<string>();
+    return new Set(draft.document.segments.map((segment) => {
+      const rawSpeakerKey = segment.speakerID == null ? "unknown" : String(segment.speakerID);
+      return draft.document.speakerOverrides?.[segment.segmentID] ?? rawSpeakerKey;
+    }));
+  }, [draft?.document.segments, draft?.document.speakerOverrides]);
 
   const save = async () => {
     if (!saved || !draft) return;
@@ -163,12 +178,6 @@ export function TranscriptEditor({ fileID }: { fileID: string }) {
     return <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">{t("unavailable")}</div>;
   }
 
-  const speakerEntries = Object.entries(draft.document.speakerNames).sort(([left], [right]) => left.localeCompare(right));
-  const effectiveSpeakerKeys = new Set(draft.document.segments.map((segment) => {
-    const rawSpeakerKey = segment.speakerID == null ? "unknown" : String(segment.speakerID);
-    return draft.document.speakerOverrides?.[segment.segmentID] ?? rawSpeakerKey;
-  }));
-
   return (
     <div className="space-y-4 pb-4">
       <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background/95 p-3 backdrop-blur">
@@ -205,34 +214,98 @@ export function TranscriptEditor({ fileID }: { fileID: string }) {
           const rawSpeakerKey = segment.speakerID == null ? "" : String(segment.speakerID);
           const selectedSpeakerKey = draft.document.speakerOverrides?.[segment.segmentID] ?? rawSpeakerKey;
           return (
-            <article key={segment.segmentID} className="rounded-md border bg-background/65 p-3">
-              <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                <span>{formatTimestamp(segment.startMs)}–{formatTimestamp(segment.endMs)}</span>
-                <span>·</span>
-                <Select value={selectedSpeakerKey || "unknown"} onValueChange={(value) => setSegmentSpeaker(segment.segmentID, value)} disabled={saving || speakerEntries.length === 0}>
-                  <SelectTrigger className="h-7 w-[9rem] px-2 text-[11px]">
-                    <SelectValue placeholder={t("unknownSpeaker")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unknown" className="text-[11px]">{t("unknownSpeaker")}</SelectItem>
-                    {speakerEntries.map(([speakerID, name]) => (
-                      <SelectItem key={speakerID} value={speakerID} className="text-[11px]">{name || t("speaker", { id: speakerID })}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {segment.lowConfidence ? <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-600 dark:text-amber-400">{t("reviewSuggested")}</span> : null}
-                {segment.edited ? <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">{t("edited")}</span> : null}
-              </div>
-              <Textarea
-                value={segment.text}
-                maxLength={20000}
-                className="min-h-20 resize-y"
-                onChange={(event) => setSegmentText(segment.segmentID, event.target.value)}
-              />
-            </article>
+            <TranscriptSegmentRow
+              key={segment.segmentID}
+              segment={segment}
+              speakerEntries={speakerEntries}
+              selectedSpeakerKey={selectedSpeakerKey}
+              saving={saving}
+              unknownSpeakerLabel={t("unknownSpeaker")}
+              reviewSuggestedLabel={t("reviewSuggested")}
+              editedLabel={t("edited")}
+              speakerLabel={speakerLabel}
+              onSpeakerChange={setSegmentSpeaker}
+              onTextChange={setSegmentText}
+            />
           );
         })}
       </section>
     </div>
   );
 }
+
+type TranscriptSegmentRowProps = {
+  segment: FileTranscriptSegmentDTO;
+  speakerEntries: [string, string][];
+  selectedSpeakerKey: string;
+  saving: boolean;
+  unknownSpeakerLabel: string;
+  reviewSuggestedLabel: string;
+  editedLabel: string;
+  speakerLabel: (id: string) => string;
+  onSpeakerChange: (segmentID: string, speakerKey: string) => void;
+  onTextChange: (segmentID: string, text: string) => void;
+};
+
+const TranscriptSegmentRow = React.memo(function TranscriptSegmentRow({
+  segment,
+  speakerEntries,
+  selectedSpeakerKey,
+  saving,
+  unknownSpeakerLabel,
+  reviewSuggestedLabel,
+  editedLabel,
+  speakerLabel,
+  onSpeakerChange,
+  onTextChange,
+}: TranscriptSegmentRowProps) {
+  const handleSpeakerChange = React.useCallback((value: string) => {
+    onSpeakerChange(segment.segmentID, value);
+  }, [segment.segmentID, onSpeakerChange]);
+
+  const handleTextChange = React.useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    onTextChange(segment.segmentID, event.target.value);
+  }, [segment.segmentID, onTextChange]);
+
+  return (
+    <article className="rounded-md border bg-background/65 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+        <span>{formatTimestamp(segment.startMs)}–{formatTimestamp(segment.endMs)}</span>
+        <span>·</span>
+        <Select
+          value={selectedSpeakerKey || "unknown"}
+          onValueChange={handleSpeakerChange}
+          disabled={saving || speakerEntries.length === 0}
+        >
+          <SelectTrigger className="h-7 w-[9rem] px-2 text-[11px]">
+            <SelectValue placeholder={unknownSpeakerLabel} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="unknown" className="text-[11px]">{unknownSpeakerLabel}</SelectItem>
+            {speakerEntries.map(([speakerID, name]) => (
+              <SelectItem key={speakerID} value={speakerID} className="text-[11px]">
+                {name || speakerLabel(speakerID)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {segment.lowConfidence ? (
+          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-600 dark:text-amber-400">
+            {reviewSuggestedLabel}
+          </span>
+        ) : null}
+        {segment.edited ? (
+          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">
+            {editedLabel}
+          </span>
+        ) : null}
+      </div>
+      <Textarea
+        value={segment.text}
+        maxLength={20000}
+        className="min-h-20 resize-y"
+        onChange={handleTextChange}
+      />
+    </article>
+  );
+});

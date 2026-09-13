@@ -67,7 +67,7 @@ func TestBuildMessageRoutePromptRebuildsRouteSpecificFields(t *testing.T) {
 	}
 }
 
-func TestBuildMessageRoutePromptRejectsHistoricalImagesForTextOnlyModel(t *testing.T) {
+func TestBuildMessageRoutePromptDowngradesHistoricalImagesForTextOnlyModel(t *testing.T) {
 	store := objectstore.NewLocal(t.TempDir())
 	if _, err := store.Put(t.Context(), "images/one", bytes.NewReader([]byte("image-one")), objectstore.PutOptions{ContentType: "image/png"}); err != nil {
 		t.Fatalf("put historical image: %v", err)
@@ -89,12 +89,44 @@ func TestBuildMessageRoutePromptRejectsHistoricalImagesForTextOnlyModel(t *testi
 		Config: config.Config{},
 	}
 
+	plan, err := service.buildMessageRoutePrompt(t.Context(), &channel.ResolvedRoute{
+		UpstreamModel:         "deepseek-chat",
+		ModelCapabilitiesJSON: `{"inputModalities":["text"]}`,
+	}, input)
+	if err != nil {
+		t.Fatalf("expected text-only route to allow conversation with downgraded historical image, got %v", err)
+	}
+	if promptMessagesContainImage(plan.Messages) {
+		t.Fatal("expected no ContentPartImage in prompt plan for text-only route")
+	}
+}
+
+func TestBuildMessageRoutePromptRejectsCurrentImagesForTextOnlyModel(t *testing.T) {
+	store := objectstore.NewLocal(t.TempDir())
+	if _, err := store.Put(t.Context(), "images/one", bytes.NewReader([]byte("image-one")), objectstore.PutOptions{ContentType: "image/png"}); err != nil {
+		t.Fatalf("put current image: %v", err)
+	}
+	service := &Service{
+		storeProvider:     &conversationTestStoreProvider{store: store},
+		imageContextCache: defaultPreparedConversationImageCache(),
+	}
+	input := messageRoutePromptInput{
+		UserContent: "描述这张图片",
+		DomainMessages: []model.Message{
+			{Role: "user", Content: "描述这张图片", Attachments: `[{"file_id":"image-1","kind":"image","mime_type":"image/png"}]`},
+		},
+		StableAttachments: []AttachmentInput{{
+			FileID: "image-1", Kind: "image", MimeType: "image/png", StoragePath: "images/one", ContextMode: fileContextModeDirectImage, Current: true,
+		}},
+		Config: config.Config{},
+	}
+
 	_, err := service.buildMessageRoutePrompt(t.Context(), &channel.ResolvedRoute{
 		UpstreamModel:         "deepseek-chat",
 		ModelCapabilitiesJSON: `{"inputModalities":["text"]}`,
 	}, input)
 	if !errors.Is(err, ErrModelImageInputUnsupported) {
-		t.Fatalf("expected text-only route to reject historical image input, got %v", err)
+		t.Fatalf("expected text-only route to reject current image input, got %v", err)
 	}
 	if code := classifyRunErrorCode(err); code != MessageErrorCodeModelImageInputUnsupported {
 		t.Fatalf("unexpected persisted image input error code: %q", code)

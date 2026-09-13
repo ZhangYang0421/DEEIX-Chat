@@ -51,6 +51,13 @@ func (r *Repo) sqliteDialect() bool {
 	return r != nil && r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite"
 }
 
+func transcriptRevisionWhere(sqlite bool) string {
+	if sqlite {
+		return "COALESCE(CAST(json_extract(CASE WHEN NULLIF(processing_payload_json, '') IS NULL THEN '{}' ELSE processing_payload_json END, '$.transcriptRevision') AS INTEGER), 1) = ?"
+	}
+	return "COALESCE((NULLIF(processing_payload_json, '')::jsonb ->> 'transcriptRevision')::int, 1) = ?"
+}
+
 func (r *Repo) trimFunctionName() string {
 	if r.sqliteDialect() {
 		return "trim"
@@ -2602,112 +2609,112 @@ func buildSingleFileKindWhereClause(filterKind string) (string, []any) {
 		return "(LOWER(mime_type) = ? OR LOWER(file_name) LIKE ?)", []any{"application/pdf", "%.pdf"}
 	case "spreadsheet":
 		return "(" + strings.Join([]string{
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-			}, " OR ") + ")", []any{
-				"%spreadsheet%",
-				"%excel%",
-				"%csv%",
-				"%.xls",
-				"%.xlsx",
-				"%.csv",
-				"%.ods",
-			}
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+		}, " OR ") + ")", []any{
+			"%spreadsheet%",
+			"%excel%",
+			"%csv%",
+			"%.xls",
+			"%.xlsx",
+			"%.csv",
+			"%.ods",
+		}
 	case "presentation":
 		return "(" + strings.Join([]string{
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-			}, " OR ") + ")", []any{
-				"%presentation%",
-				"%powerpoint%",
-				"%.ppt",
-				"%.pptx",
-				"%.odp",
-			}
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+		}, " OR ") + ")", []any{
+			"%presentation%",
+			"%powerpoint%",
+			"%.ppt",
+			"%.pptx",
+			"%.odp",
+		}
 	case "document":
 		return "(" + strings.Join([]string{
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-			}, " OR ") + ")", []any{
-				"%word%",
-				"%rtf%",
-				"%opendocument.text%",
-				"%.doc",
-				"%.docx",
-				"%.rtf",
-				"%.odt",
-				"%.pages",
-			}
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+		}, " OR ") + ")", []any{
+			"%word%",
+			"%rtf%",
+			"%opendocument.text%",
+			"%.doc",
+			"%.docx",
+			"%.rtf",
+			"%.odt",
+			"%.pages",
+		}
 	case "code":
 		return "(" + strings.Join([]string{
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(mime_type) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-				"LOWER(file_name) LIKE ?",
-			}, " OR ") + ")", []any{
-				"text/%",
-				"%json%",
-				"%javascript%",
-				"%typescript%",
-				"%xml%",
-				"%html%",
-				"%css%",
-				"%yaml%",
-				"%toml%",
-				"%sql%",
-				"%markdown%",
-				"%.js",
-				"%.jsx",
-				"%.ts",
-				"%.tsx",
-				"%.json",
-				"%.html",
-				"%.css",
-				"%.md",
-				"%.xml",
-				"%.yaml",
-				"%.yml",
-				"%.toml",
-				"%.sql",
-				"%.sh",
-				"%.py",
-			}
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(mime_type) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+			"LOWER(file_name) LIKE ?",
+		}, " OR ") + ")", []any{
+			"text/%",
+			"%json%",
+			"%javascript%",
+			"%typescript%",
+			"%xml%",
+			"%html%",
+			"%css%",
+			"%yaml%",
+			"%toml%",
+			"%sql%",
+			"%markdown%",
+			"%.js",
+			"%.jsx",
+			"%.ts",
+			"%.tsx",
+			"%.json",
+			"%.html",
+			"%.css",
+			"%.md",
+			"%.xml",
+			"%.yaml",
+			"%.yml",
+			"%.toml",
+			"%.sql",
+			"%.sh",
+			"%.py",
+		}
 	default:
 		return "", nil
 	}
@@ -2933,46 +2940,55 @@ func (r *Repo) QueueFileEmbedding(ctx context.Context, userID uint, fileID strin
 
 // ClaimFileEmbedding 原子领取指定向量空间的文件任务。
 // 同一签名已经处于 processing/ready 时不会重复领取；切换向量空间后允许新任务接管。
-func (r *Repo) ClaimFileEmbedding(ctx context.Context, userID uint, fileID string, embeddingSignature string) (bool, error) {
+func (r *Repo) ClaimFileEmbedding(ctx context.Context, userID uint, fileID string, embeddingSignature string, expectedTranscriptRevision int) (bool, error) {
 	fileID = strings.TrimSpace(fileID)
 	embeddingSignature = strings.TrimSpace(embeddingSignature)
 	if fileID == "" || embeddingSignature == "" {
 		return false, repository.ErrInvalidInput
 	}
-	result := r.db.WithContext(ctx).
+	query := r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
 		Where("user_id = ? AND file_id = ? AND status = ?", userID, fileID, "active").
-		Where("NOT (embed_signature = ? AND embed_status IN ?)", embeddingSignature, []string{"processing", "ready"}).
-		Updates(map[string]any{
-			"embed_status":    "processing",
-			"embed_signature": embeddingSignature,
-			"embed_error":     "",
-		})
+		Where("NOT (embed_signature = ? AND embed_status IN ?)", embeddingSignature, []string{"processing", "ready"})
+	if expectedTranscriptRevision > 0 {
+		query = query.Where(transcriptRevisionWhere(r.sqliteDialect()), expectedTranscriptRevision)
+	}
+	result := query.Updates(map[string]any{
+		"embed_status":    "processing",
+		"embed_signature": embeddingSignature,
+		"embed_error":     "",
+	})
 	return result.RowsAffected > 0, dberror.Translate(result.Error)
 }
 
-// UpdateFileObjectEmbedStatus 仅更新仍属于指定向量空间任务的文件状态。
+// UpdateFileObjectEmbedStatus 仅更新仍属于指定向量空间及 transcript revision 的任务状态。
 // 同时同步 RAG 可用状态，确保 Embedding 就绪后才允许该文件参与语义检索。
-func (r *Repo) UpdateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, embeddingSignature string, status string, embedErr string) (bool, error) {
+func (r *Repo) UpdateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, embeddingSignature string, status string, embedErr string, expectedTranscriptRevision int) (bool, error) {
 	ragReady, ragReason := embeddingRAGState(status)
-	result := r.db.WithContext(ctx).
+	query := r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
-		Where("user_id = ? AND file_id = ? AND status = ? AND embed_signature = ?", userID, fileID, "active", strings.TrimSpace(embeddingSignature)).
-		Updates(map[string]any{
-			"embed_status": status,
-			"embed_error":  embedErr,
-			"rag_ready":    ragReady,
-			"rag_reason":   ragReason,
-		})
+		Where("user_id = ? AND file_id = ? AND status = ? AND embed_signature = ?", userID, fileID, "active", strings.TrimSpace(embeddingSignature))
+	if expectedTranscriptRevision > 0 {
+		query = query.Where(transcriptRevisionWhere(r.sqliteDialect()), expectedTranscriptRevision)
+	}
+	result := query.Updates(map[string]any{
+		"embed_status": status,
+		"embed_error":  embedErr,
+		"rag_ready":    ragReady,
+		"rag_reason":   ragReason,
+	})
 	return result.RowsAffected > 0, dberror.Translate(result.Error)
 }
 
 // UpdateFileObjectChunkCount 在 embedding 完成后更新分片数量。
-func (r *Repo) UpdateFileObjectChunkCount(ctx context.Context, fileObjID uint, embeddingSignature string, chunkCount int) (bool, error) {
-	result := r.db.WithContext(ctx).
+func (r *Repo) UpdateFileObjectChunkCount(ctx context.Context, fileObjID uint, embeddingSignature string, chunkCount int, expectedTranscriptRevision int) (bool, error) {
+	query := r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
-		Where("id = ? AND status = ? AND embed_signature = ?", fileObjID, "active", strings.TrimSpace(embeddingSignature)).
-		Update("chunk_count", chunkCount)
+		Where("id = ? AND status = ? AND embed_signature = ?", fileObjID, "active", strings.TrimSpace(embeddingSignature))
+	if expectedTranscriptRevision > 0 {
+		query = query.Where(transcriptRevisionWhere(r.sqliteDialect()), expectedTranscriptRevision)
+	}
+	result := query.Update("chunk_count", chunkCount)
 	return result.RowsAffected > 0, dberror.Translate(result.Error)
 }
 
@@ -3055,9 +3071,16 @@ func (r *Repo) CloneFileEmbeddingArtifacts(ctx context.Context, source *domainco
 	})
 }
 
-// ReplaceFileChunks 仅在文件任务仍属于指定向量空间时替换全部分片。
-// 文件行锁使配置切换后的新任务领取与旧任务发布按顺序完成，避免旧向量覆盖新向量。
-func (r *Repo) ReplaceFileChunks(ctx context.Context, fileObjID uint, embeddingSignature string, chunks []domainconversation.FileChunk, embeddings [][]float32) (bool, error) {
+// ReplaceFileChunks 仅在文件任务仍属于指定向量空间及指定 transcript revision 时替换全部分片。
+// 文件行锁使配置切换或 transcript 发布后的新任务领取与旧任务发布按顺序完成，避免旧向量覆盖新向量。
+func (r *Repo) ReplaceFileChunks(
+	ctx context.Context,
+	fileObjID uint,
+	embeddingSignature string,
+	chunks []domainconversation.FileChunk,
+	embeddings [][]float32,
+	expectedTranscriptRevision int,
+) (bool, error) {
 	if len(chunks) != len(embeddings) {
 		return false, fmt.Errorf("embedding count mismatch: chunks=%d embeddings=%d", len(chunks), len(embeddings))
 	}
@@ -3070,8 +3093,11 @@ func (r *Repo) ReplaceFileChunks(ctx context.Context, fileObjID uint, embeddingS
 		var file models.FileObject
 		claim := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Select("id").
-			Where("id = ? AND status = ? AND embed_status = ? AND embed_signature = ?", fileObjID, "active", "processing", embeddingSignature).
-			Take(&file)
+			Where("id = ? AND status = ? AND embed_status = ? AND embed_signature = ?", fileObjID, "active", "processing", embeddingSignature)
+		if expectedTranscriptRevision > 0 {
+			claim = claim.Where(transcriptRevisionWhere(r.sqliteDialect()), expectedTranscriptRevision)
+		}
+		claim = claim.Take(&file)
 		if errors.Is(claim.Error, gorm.ErrRecordNotFound) {
 			return nil
 		}

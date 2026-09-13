@@ -300,11 +300,17 @@ func (s *Service) InitializeUploadedFile(ctx context.Context, fileObj *domaincon
 		}
 		initialPayloadJSON = stringPtr(string(payload))
 	}
+	emptyErrorCode := ""
+	emptyErrorMessage := ""
+	var emptyCompletedAt *time.Time
 	if err := s.repo.UpdateFileObjectProcessing(ctx, fileObj.UserID, fileObj.FileID, repository.UpdateFileObjectProcessingInput{
-		ProcessingStatus:      &processingStatus,
-		ProcessingReady:       &processingReady,
-		ExtractStatus:         &extractStatus,
-		ProcessingPayloadJSON: initialPayloadJSON,
+		ProcessingStatus:       &processingStatus,
+		ProcessingReady:        &processingReady,
+		ProcessingErrorCode:    &emptyErrorCode,
+		ProcessingErrorMessage: &emptyErrorMessage,
+		ExtractStatus:          &extractStatus,
+		ProcessingPayloadJSON:  initialPayloadJSON,
+		ProcessingCompletedAt:  timePtr(emptyCompletedAt),
 	}); err != nil {
 		return err
 	}
@@ -323,7 +329,10 @@ func (s *Service) InitializeUploadedFile(ctx context.Context, fileObj *domaincon
 			}
 			return ""
 		}(),
-		StartedAt: processingStartedAt,
+		StartedAt:    processingStartedAt,
+		ErrorCode:    "",
+		ErrorMessage: "",
+		CompletedAt:  nil,
 	}); err != nil {
 		return err
 	}
@@ -938,7 +947,16 @@ func (s *Service) handleEmbeddingMessage(ctx context.Context, consumerName strin
 		consumerName,
 		msg,
 	)
-	err := s.embeddingSvc.ProcessTargetedJob(processingCtx, job)
+	resolvedJob, resolveErr := s.embeddingSvc.ResolveTargetedJob(processingCtx, job)
+	if resolveErr == nil {
+		job = resolvedJob
+	}
+	var err error
+	if resolveErr != nil {
+		err = resolveErr
+	} else {
+		err = s.embeddingSvc.ProcessTargetedJob(processingCtx, job)
+	}
 	stopLease()
 	<-leaseDone
 	cancelProcessing()
@@ -1380,13 +1398,25 @@ func processingErrorSummary(err error) string {
 	return HumanizeFileProcessingError("", code, "")
 }
 
-func HumanizeFileProcessingError(fileCategory string, code string, _ string) string {
+func HumanizeFileProcessingError(fileCategory string, code string, rawMessage string) string {
 	normalizedCode := strings.ToLower(strings.TrimSpace(code))
 	if normalizedCode == "" {
 		normalizedCode = "extract_failed"
 	}
 
 	switch normalizedCode {
+	case "transcription_failed":
+		return "录音转写失败，请稍后手动重试。"
+	case "transcription_not_configured":
+		return "录音转写服务未配置。"
+	case "transcription_storage_unavailable":
+		return "录音存储服务不可用。"
+	case "transcription_requires_s3":
+		return "录音转写需要支持预签名下载的对象存储。"
+	case "transcription_presign_failed":
+		return "无法生成录音临时下载地址。"
+	case "transcription_result_download_failed":
+		return "录音转写结果下载失败，请手动重试。"
 	case "queue_full":
 		return "文件处理队列繁忙，请稍后重试。"
 	case "queue_unavailable":

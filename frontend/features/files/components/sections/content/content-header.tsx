@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, DatabaseZap, Download, ExternalLink, LoaderCircle, Trash2 } from "lucide-react";
+import { ChevronLeft, DatabaseZap, Download, ExternalLink, LoaderCircle, RotateCcw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import * as React from "react";
 import { AnimatedText } from "@/components/ui/animated-text";
@@ -17,11 +17,14 @@ type ContentHeaderProps = {
   file: FileObjectDTO | null;
   preview: FilePreviewState;
   deleting: boolean;
+  retrying: boolean;
+  retryingBusy: boolean;
   vectorizing: boolean;
   onBack?: () => void;
   onOpen: () => void;
   onDownload: () => void;
   onDeleteRequest: (file: FileObjectDTO) => void;
+  onRetryProcessing: (fileID: string) => Promise<void>;
   onToggleRagOptOut: (fileID: string, current: boolean) => Promise<void>;
   onVectorize: (fileID: string) => Promise<void>;
 };
@@ -44,11 +47,14 @@ export function ContentHeader({
   file,
   preview,
   deleting,
+  retrying,
+  retryingBusy,
   vectorizing,
   onBack,
   onOpen,
   onDownload,
   onDeleteRequest,
+  onRetryProcessing,
   onToggleRagOptOut,
   onVectorize,
 }: ContentHeaderProps) {
@@ -154,6 +160,20 @@ export function ContentHeader({
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
+        {file.fileCategory !== "audio" && file.processingStatus === "failed" ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="size-6"
+            onClick={() => onRetryProcessing(file.fileID)}
+            disabled={retryingBusy}
+            aria-label={t("actions.retryProcessing")}
+            title={t("actions.retryProcessing")}
+          >
+            {retrying ? <LoaderCircle className="size-3.5 animate-spin" strokeWidth={1.6} /> : <RotateCcw className="size-3.5" strokeWidth={1.6} />}
+          </Button>
+        ) : null}
         {canManuallyVectorizeFile(file) ? (
           <Button
             type="button"

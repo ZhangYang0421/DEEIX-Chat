@@ -372,6 +372,38 @@ func TestUploadFileAllowsUnlimitedUserStorageQuota(t *testing.T) {
 	}
 }
 
+func TestUploadFileAcceptsID3v2MP3(t *testing.T) {
+	ctx := context.Background()
+	repo := newUploadTestRepo()
+	store := newUploadTestStore()
+	service := newUploadTestService(repo, store)
+	content := []byte{'I', 'D', '3', 4, 0, 0, 0, 0, 0, 0}
+
+	result, err := service.UploadFile(ctx, UploadFileInput{
+		UserID:       1,
+		Purpose:      "chat",
+		FileName:     "recording.mp3",
+		MimeType:     "audio/mpeg",
+		DeclaredSize: int64(len(content)),
+		Reader:       bytes.NewReader(content),
+	})
+	if err != nil {
+		t.Fatalf("ID3v2 MP3 upload failed: %v", err)
+	}
+	if result.File.DetectedMIME != "audio/mpeg" {
+		t.Fatalf("DetectedMIME = %q, want audio/mpeg", result.File.DetectedMIME)
+	}
+	if result.File.FileCategory != fileCategoryAudio {
+		t.Fatalf("FileCategory = %q, want %q", result.File.FileCategory, fileCategoryAudio)
+	}
+	if result.File.ProcessingStatus != "queued" || result.File.ProcessingReady {
+		t.Fatalf("audio processing state = %q ready=%v, want queued/false", result.File.ProcessingStatus, result.File.ProcessingReady)
+	}
+	if got := store.objectCount(); got != 1 {
+		t.Fatalf("ID3v2 MP3 upload stored %d objects, want 1", got)
+	}
+}
+
 func TestNormalizeDetectedMIMEDowngradesActiveContent(t *testing.T) {
 	tests := []struct {
 		detected string

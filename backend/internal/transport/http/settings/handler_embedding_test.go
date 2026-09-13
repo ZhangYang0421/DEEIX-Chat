@@ -115,19 +115,19 @@ func (testEmbeddingRepo) QueueFileEmbedding(context.Context, uint, string, strin
 	return true, nil
 }
 
-func (testEmbeddingRepo) ClaimFileEmbedding(context.Context, uint, string, string) (bool, error) {
+func (testEmbeddingRepo) ClaimFileEmbedding(context.Context, uint, string, string, int) (bool, error) {
 	return true, nil
 }
 
-func (testEmbeddingRepo) UpdateFileObjectEmbedStatus(context.Context, uint, string, string, string, string) (bool, error) {
+func (testEmbeddingRepo) UpdateFileObjectEmbedStatus(context.Context, uint, string, string, string, string, int) (bool, error) {
 	return true, nil
 }
 
-func (testEmbeddingRepo) UpdateFileObjectChunkCount(context.Context, uint, string, int) (bool, error) {
+func (testEmbeddingRepo) UpdateFileObjectChunkCount(context.Context, uint, string, int, int) (bool, error) {
 	return true, nil
 }
 
-func (testEmbeddingRepo) ReplaceFileChunks(context.Context, uint, string, []domainconversation.FileChunk, [][]float32) (bool, error) {
+func (testEmbeddingRepo) ReplaceFileChunks(context.Context, uint, string, []domainconversation.FileChunk, [][]float32, int) (bool, error) {
 	return true, nil
 }
 

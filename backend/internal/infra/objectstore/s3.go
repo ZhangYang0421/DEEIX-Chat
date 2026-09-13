@@ -105,6 +105,40 @@ func (s *S3Store) Put(ctx context.Context, key string, body io.Reader, opts PutO
 	return ObjectInfo{Key: normalizedKey, SizeBytes: opts.SizeBytes, ContentType: strings.TrimSpace(opts.ContentType), ModTime: time.Now()}, nil
 }
 
+// PutIfAbsent 使用 If-None-Match 条件写入，避免并发请求覆盖既有对象。
+func (s *S3Store) PutIfAbsent(ctx context.Context, key string, body io.Reader, opts PutOptions) (ObjectInfo, error) {
+	normalizedKey := normalizeKey(key)
+	if normalizedKey == "" {
+		return ObjectInfo{}, ErrInvalidKey
+	}
+	input := &s3.PutObjectInput{
+		Bucket:      aws.String(s.bucket),
+		Key:         aws.String(s.objectKey(normalizedKey)),
+		Body:        body,
+		IfNoneMatch: aws.String("*"),
+	}
+	if opts.SizeBytes >= 0 {
+		input.ContentLength = aws.Int64(opts.SizeBytes)
+	}
+	if contentType := strings.TrimSpace(opts.ContentType); contentType != "" {
+		input.ContentType = aws.String(contentType)
+	}
+	ctx, span := s.startSpan(ctx, "objectstore.s3.put_if_absent",
+		attribute.Int64("objectstore.size_bytes", opts.SizeBytes),
+		attribute.String("objectstore.content_type", strings.TrimSpace(opts.ContentType)),
+	)
+	_, err := s.client.PutObject(ctx, input)
+	platformtracing.RecordError(span, err)
+	span.End()
+	if err != nil {
+		if isS3AlreadyExists(err) {
+			return ObjectInfo{}, ErrAlreadyExists
+		}
+		return ObjectInfo{}, err
+	}
+	return ObjectInfo{Key: normalizedKey, SizeBytes: opts.SizeBytes, ContentType: strings.TrimSpace(opts.ContentType), ModTime: time.Now()}, nil
+}
+
 func (s *S3Store) Open(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, error) {
 	normalizedKey := normalizeKey(key)
 	if normalizedKey == "" {
@@ -254,6 +288,17 @@ func isS3NotFound(err error) bool {
 	if errors.As(err, &apiErr) {
 		code := apiErr.ErrorCode()
 		return code == "NoSuchKey" || code == "NotFound" || code == "404"
+	}
+	return false
+}
+
+func isS3AlreadyExists(err error) bool {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "PreconditionFailed", "ConditionalRequestConflict":
+			return true
+		}
 	}
 	return false
 }

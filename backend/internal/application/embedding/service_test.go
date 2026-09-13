@@ -42,6 +42,25 @@ func TestL2NormalizeSupportsMaximumConfiguredDimensions(t *testing.T) {
 	}
 }
 
+func TestTranscriptRevisionForChunkPublication(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		file domainconversation.FileObject
+		want int
+	}{
+		{name: "non_audio", file: domainconversation.FileObject{FileCategory: "text"}, want: 0},
+		{name: "audio_default", file: domainconversation.FileObject{FileCategory: "audio", ProcessingPayloadJSON: `{}`}, want: 1},
+		{name: "audio_invalid_payload", file: domainconversation.FileObject{FileCategory: "audio", ProcessingPayloadJSON: `{`}, want: 1},
+		{name: "audio_revision", file: domainconversation.FileObject{FileCategory: "audio", ProcessingPayloadJSON: `{"transcriptRevision":7}`}, want: 7},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := transcriptRevisionForChunkPublication(test.file); got != test.want {
+				t.Fatalf("transcript revision guard = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
 func TestShouldTriggerIncludesOCRImages(t *testing.T) {
 	service := newTestService(config.Config{
 		RAGEnabled:             true,
@@ -557,6 +576,7 @@ func TestCompleteFileEmbeddingKeepsChangedConfigurationStale(t *testing.T) {
 		domainconversation.FileObject{UserID: 1, FileID: "file_1"},
 		ComputeModelSignature("old-model", 1536),
 		"http://127.0.0.1:8081",
+		0,
 	)
 	if err != nil {
 		t.Fatalf("completeFileEmbedding() error = %v", err)
@@ -615,6 +635,7 @@ func TestCompleteFileEmbeddingClosesReadyPublicationRace(t *testing.T) {
 		domainconversation.FileObject{UserID: 1, FileID: "file_1"},
 		ComputeModelSignature(initial.RAGModel, initial.EmbeddingOutputDimensions),
 		initial.EmbeddingHost,
+		0,
 	)
 	if err != nil {
 		t.Fatalf("completeFileEmbedding() error = %v", err)
@@ -638,6 +659,7 @@ func TestCompleteFileEmbeddingKeepsChangedEndpointStale(t *testing.T) {
 		domainconversation.FileObject{UserID: 1, FileID: "file_1"},
 		ComputeModelSignature("same-model", 1536),
 		"http://old.example/v1/",
+		0,
 	)
 	if err != nil {
 		t.Fatalf("completeFileEmbedding() error = %v", err)
@@ -722,12 +744,12 @@ func (r *reindexRepo) QueueFileEmbedding(_ context.Context, _ uint, fileID strin
 	return true, nil
 }
 
-func (r *reindexRepo) ClaimFileEmbedding(_ context.Context, _ uint, fileID string, _ string) (bool, error) {
+func (r *reindexRepo) ClaimFileEmbedding(_ context.Context, _ uint, fileID string, _ string, _ int) (bool, error) {
 	r.claimedFileIDs = append(r.claimedFileIDs, fileID)
 	return true, nil
 }
 
-func (r *reindexRepo) UpdateFileObjectEmbedStatus(_ context.Context, _ uint, _ string, _ string, status string, _ string) (bool, error) {
+func (r *reindexRepo) UpdateFileObjectEmbedStatus(_ context.Context, _ uint, _ string, _ string, status string, _ string, _ int) (bool, error) {
 	r.updateStatusCalls++
 	r.statusHistory = append(r.statusHistory, status)
 	if r.onStatus != nil {
@@ -736,11 +758,11 @@ func (r *reindexRepo) UpdateFileObjectEmbedStatus(_ context.Context, _ uint, _ s
 	return true, nil
 }
 
-func (r *reindexRepo) UpdateFileObjectChunkCount(context.Context, uint, string, int) (bool, error) {
+func (r *reindexRepo) UpdateFileObjectChunkCount(context.Context, uint, string, int, int) (bool, error) {
 	return true, nil
 }
 
-func (r *reindexRepo) ReplaceFileChunks(context.Context, uint, string, []domainconversation.FileChunk, [][]float32) (bool, error) {
+func (r *reindexRepo) ReplaceFileChunks(context.Context, uint, string, []domainconversation.FileChunk, [][]float32, int) (bool, error) {
 	return true, nil
 }
 

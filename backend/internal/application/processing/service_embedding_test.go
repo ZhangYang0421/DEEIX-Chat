@@ -66,11 +66,11 @@ func (r *targetedEmbeddingRepositoryStub) QueueFileEmbedding(_ context.Context, 
 	return true, nil
 }
 
-func (*targetedEmbeddingRepositoryStub) ClaimFileEmbedding(context.Context, uint, string, string) (bool, error) {
+func (*targetedEmbeddingRepositoryStub) ClaimFileEmbedding(context.Context, uint, string, string, int) (bool, error) {
 	return true, nil
 }
 
-func (r *targetedEmbeddingRepositoryStub) UpdateFileObjectEmbedStatus(_ context.Context, _ uint, fileID, _ string, status, _ string) (bool, error) {
+func (r *targetedEmbeddingRepositoryStub) UpdateFileObjectEmbedStatus(_ context.Context, _ uint, fileID, _ string, status, _ string, _ int) (bool, error) {
 	if r.statusHistory == nil {
 		r.statusHistory = make(map[string][]string)
 	}
@@ -78,11 +78,11 @@ func (r *targetedEmbeddingRepositoryStub) UpdateFileObjectEmbedStatus(_ context.
 	return true, nil
 }
 
-func (*targetedEmbeddingRepositoryStub) UpdateFileObjectChunkCount(context.Context, uint, string, int) (bool, error) {
+func (*targetedEmbeddingRepositoryStub) UpdateFileObjectChunkCount(context.Context, uint, string, int, int) (bool, error) {
 	return true, nil
 }
 
-func (*targetedEmbeddingRepositoryStub) ReplaceFileChunks(context.Context, uint, string, []domainconversation.FileChunk, [][]float32) (bool, error) {
+func (*targetedEmbeddingRepositoryStub) ReplaceFileChunks(context.Context, uint, string, []domainconversation.FileChunk, [][]float32, int) (bool, error) {
 	return true, nil
 }
 
@@ -178,7 +178,10 @@ func TestSubmitFileEmbeddingsKeepsPerFileFailuresIsolated(t *testing.T) {
 
 func TestEmbeddingDeadLetterFinalizesFileStatus(t *testing.T) {
 	cfg := targetedEmbeddingTestConfig()
-	repo := &targetedEmbeddingRepositoryStub{vectorError: errors.New("vector store unavailable")}
+	repo := &targetedEmbeddingRepositoryStub{
+		files: []domainconversation.FileObject{targetedEmbeddingTestFile("file_1")},
+		vectorError: errors.New("vector store unavailable"),
+	}
 	queue := memorycache.New()
 	embeddingSvc := appembedding.NewServiceWithRuntime(
 		config.NewRuntime(cfg),

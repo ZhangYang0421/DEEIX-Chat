@@ -179,6 +179,7 @@
   },
   "file": {
     "embeddingUnavailable": "Embedding is unavailable for this file.",
+    "processingRetryNotAllowed": "This file cannot be retried in its current processing state.",
     "extractNotReady": "File extraction is not ready.",
     "invalidId": "Invalid file ID.",
     "invalidName": "Invalid file name.",

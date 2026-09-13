@@ -17,15 +17,18 @@ const (
 
 // 数据契约定义在 ports/objectstore，此处保留同名引用供实现使用。
 var (
-	ErrInvalidKey    = portobjectstore.ErrInvalidKey
-	ErrInvalidExpiry = errors.New("invalid presign expiry")
-	ErrNotFound      = portobjectstore.ErrNotFound
-	ErrUnsupported   = portobjectstore.ErrUnsupported
+	ErrInvalidKey       = portobjectstore.ErrInvalidKey
+	ErrInvalidExpiry    = errors.New("invalid presign expiry")
+	ErrNotFound         = portobjectstore.ErrNotFound
+	ErrUnsupported      = portobjectstore.ErrUnsupported
+	ErrAlreadyExists    = portobjectstore.ErrAlreadyExists
+	ErrContentMismatch  = portobjectstore.ErrContentMismatch
 )
 
 type (
-	PutOptions = portobjectstore.PutOptions
-	ObjectInfo = portobjectstore.ObjectInfo
+	PutOptions       = portobjectstore.PutOptions
+	ObjectInfo       = portobjectstore.ObjectInfo
+	PutIfAbsentStore = portobjectstore.PutIfAbsentStore
 )
 
 // Store 在上游端口契约基础上保留音频转写所需的预签名下载能力。

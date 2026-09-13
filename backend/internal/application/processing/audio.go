@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,6 +26,15 @@ const (
 	audioPollDelay        = 3 * time.Second
 	audioRecoveryBatch    = 1000
 	audioProcessingEngine = "fun-asr"
+)
+
+var (
+	audioDiagnosticURIPattern            = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s<>"']+`)
+	audioDiagnosticAuthorizationPattern  = regexp.MustCompile(`(?i)\b(?:proxy-)?authorization\s*[:=]\s*[^\s,;]+(?:\s+[^\s,;]+)?`)
+	audioDiagnosticBearerPattern         = regexp.MustCompile(`(?i)\bbearer\s+[a-z0-9._~+/=-]+`)
+	audioDiagnosticJSONCredentialPattern = regexp.MustCompile(`(?i)(?:\\["']|["'])([a-z0-9_.-]*(?:api[_-]?key|token|signature|credential|secret|password|authorization|auth)[a-z0-9_.-]*)(?:\\["']|["'])\s*[:=]\s*(?:\\["']|["'])[^"'\\]*(?:\\["']|["'])`)
+	audioDiagnosticCredentialPattern     = regexp.MustCompile(`(?i)\b([a-z0-9_.-]*(?:api[_-]?key|token|signature|credential|secret|password)[a-z0-9_.-]*)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;}\]]+)`)
+	audioDiagnosticPathPattern           = regexp.MustCompile(`(?i)(?:[a-z]:[\\/](?:[^\\/\s,;]+[\\/])*[^\\/\s,;]+|\\\\[^\\/\s,;]+[\\/][^\\/\s,;]+(?:[\\/][^\\/\s,;]+)*|/(?:[^/\s,;]+/)+[^/\s,;]+)`)
 )
 
 // audioProcessingPayload 是 file_objects.processing_payload_json 中的最小可恢复状态。
@@ -191,11 +202,15 @@ func (s *Service) pollAudio(ctx context.Context, store objectstore.Store, fileOb
 		return nil
 	}
 	if !status.Succeeded {
-		message := "录音转写失败，请手动重试"
-		if strings.TrimSpace(status.Message) != "" {
-			message = "录音转写失败，请稍后手动重试"
+		if diagnostic := sanitizeAudioTaskFailureDiagnostic(status.Message); diagnostic != "" && s.logger != nil {
+			s.logger.Warn("audio_transcription_task_failed",
+				zap.Uint("user_id", fileObj.UserID),
+				zap.String("file_id", fileObj.FileID),
+				zap.String("task_status", payload.TaskStatus),
+				zap.String("upstream_detail", diagnostic),
+			)
 		}
-		return s.failAudio(ctx, fileObj, "transcription_failed", message)
+		return s.failAudio(ctx, fileObj, "transcription_failed", "录音转写失败，请稍后手动重试")
 	}
 
 	requestCtx, cancel = context.WithTimeout(ctx, audioRequestTimeout)
@@ -389,15 +404,31 @@ func putAudioArtifact(ctx context.Context, store objectstore.Store, path string,
 }
 
 func putAudioArtifactImmutable(ctx context.Context, store objectstore.Store, path string, data []byte, contentType string) error {
-	reader, _, err := store.Open(ctx, path)
+	conditional, ok := store.(objectstore.PutIfAbsentStore)
+	if !ok {
+		return objectstore.ErrUnsupported
+	}
+	_, err := conditional.PutIfAbsent(ctx, path, bytes.NewReader(data), objectstore.PutOptions{SizeBytes: int64(len(data)), ContentType: contentType})
 	if err == nil {
-		_ = reader.Close()
 		return nil
 	}
-	if !errors.Is(err, objectstore.ErrNotFound) {
+	if !errors.Is(err, objectstore.ErrAlreadyExists) {
 		return err
 	}
-	return putAudioArtifact(ctx, store, path, data, contentType)
+
+	reader, _, openErr := store.Open(ctx, path)
+	if openErr != nil {
+		return openErr
+	}
+	existing, readErr := io.ReadAll(reader)
+	closeErr := reader.Close()
+	if err = errors.Join(readErr, closeErr); err != nil {
+		return err
+	}
+	if !bytes.Equal(existing, data) {
+		return fmt.Errorf("%w: %s", objectstore.ErrContentMismatch, path)
+	}
+	return nil
 }
 
 func audioErrorCode(err error) string {
@@ -412,6 +443,20 @@ func audioErrorMessage(err error) string {
 		return "录音转写服务未配置"
 	}
 	return "录音转写请求失败，请稍后手动重试"
+}
+
+func sanitizeAudioTaskFailureDiagnostic(message string) string {
+	diagnostic := strings.Join(strings.Fields(message), " ")
+	if diagnostic == "" {
+		return ""
+	}
+	diagnostic = audioDiagnosticURIPattern.ReplaceAllString(diagnostic, "[REDACTED_URL]")
+	diagnostic = audioDiagnosticAuthorizationPattern.ReplaceAllString(diagnostic, "Authorization=[REDACTED]")
+	diagnostic = audioDiagnosticBearerPattern.ReplaceAllString(diagnostic, "Bearer [REDACTED]")
+	diagnostic = audioDiagnosticCredentialPattern.ReplaceAllString(diagnostic, "${1}=[REDACTED]")
+	diagnostic = audioDiagnosticJSONCredentialPattern.ReplaceAllString(diagnostic, "${1}=[REDACTED]")
+	diagnostic = audioDiagnosticPathPattern.ReplaceAllString(diagnostic, "[REDACTED_PATH]")
+	return textutil.TruncateTrimmed(diagnostic, 255)
 }
 
 func stringPtr(value string) *string { return &value }

@@ -13,6 +13,7 @@ import {
   deleteFile,
   listFiles,
   renameFile,
+  retryFileProcessing,
   submitFileEmbeddings,
   updateFileRagOptOut,
   uploadFile,
@@ -24,11 +25,11 @@ import type {
   UserStorageQuotaDTO,
 } from "@/shared/api/file.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { useDebouncedValue } from "@/shared/hooks/use-debounced-value";
 import {
   type FileStatusPollingResult,
   useFileProcessingStatusPolling,
 } from "@/shared/hooks/use-file-processing-status-polling";
-import { useDebouncedValue } from "@/shared/hooks/use-debounced-value";
 import { runBulkActionInChunks, runSettledItemsWithConcurrency } from "@/shared/lib/bulk-action";
 import { resolveFileFilter } from "@/shared/lib/file-display";
 import { canManuallyVectorizeFile, isFileProcessing } from "@/shared/lib/file-processing";
@@ -62,6 +63,7 @@ type UseFilesPageResult = {
   loadingMore: boolean;
   uploading: boolean;
   deletingFileID: string | null;
+  retryingFileID: string | null;
   selectedFileIDs: string[];
   bulkDeleteOpen: boolean;
   bulkDeleting: boolean;
@@ -104,6 +106,7 @@ type UseFilesPageResult = {
   onBulkDeleteRequest: () => void;
   onClearBulkDelete: () => void;
   onConfirmBulkDelete: () => Promise<void>;
+  onRetryFileProcessing: (fileID: string) => Promise<void>;
   onVectorizeFile: (fileID: string) => Promise<void>;
   onVectorizeSelected: () => Promise<void>;
   onBackToList: () => void;
@@ -131,6 +134,8 @@ export function useFilesPage(): UseFilesPageResult {
   const loadRequestSeqRef = React.useRef(0);
   const loadRequestControllerRef = React.useRef<AbortController | null>(null);
   const uploadRequestControllerRef = React.useRef<AbortController | null>(null);
+  const retryingFileIDRef = React.useRef<string | null>(null);
+  const latestLoadFilesRef = React.useRef<((options?: LoadFilesOptions) => Promise<void>) | null>(null);
   const hasLoadedOnceRef = React.useRef(false);
 
   const [files, setFiles] = React.useState<FileObjectDTO[]>([]);
@@ -142,6 +147,7 @@ export function useFilesPage(): UseFilesPageResult {
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
   const [deletingFileID, setDeletingFileID] = React.useState<string | null>(null);
+  const [retryingFileID, setRetryingFileID] = React.useState<string | null>(null);
   const [selectedFileIDs, setSelectedFileIDs] = React.useState<string[]>([]);
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false);
   const [bulkDeleting, setBulkDeleting] = React.useState(false);
@@ -334,6 +340,8 @@ export function useFilesPage(): UseFilesPageResult {
     },
     [debouncedQuery, ensureAccessToken, filterKeys, resolveErrorMessage, sortKey, t],
   );
+
+  latestLoadFilesRef.current = loadFiles;
 
   React.useEffect(() => {
     void loadFiles({
@@ -575,6 +583,62 @@ export function useFilesPage(): UseFilesPageResult {
     },
     [debouncedQuery, ensureAccessToken, filterKeys, loadFiles, resolveErrorMessage, t],
   );
+
+  const onRetryFileProcessing = React.useCallback(async (fileID: string) => {
+    const target = filesRef.current.find((item) => item.fileID === fileID);
+    if (!target || target.fileCategory === "audio" || target.processingStatus !== "failed" || retryingFileIDRef.current) {
+      return;
+    }
+
+    const refreshCurrentFiles = async () => {
+      await latestLoadFilesRef.current?.({
+        preferredFileID: fileID,
+        silent: true,
+        background: true,
+      });
+    };
+
+    retryingFileIDRef.current = fileID;
+    setRetryingFileID(fileID);
+    try {
+      const token = await ensureAccessToken();
+      if (!token) {
+        toast.error(t("toasts.sessionExpired"), { description: t("toasts.operateAfterLogin") });
+        return;
+      }
+
+      const result = await retryFileProcessing(token, fileID);
+      if (!isMountedRef.current) {
+        return;
+      }
+      const nextFiles = patchByID(filesRef.current, fileID, (item) => item.fileID, {
+        processingStatus: result.processingStatus,
+        processingReady: false,
+        processingErrorCode: "",
+        processingErrorMessage: "",
+        extractStatus: "none",
+      });
+      filesRef.current = nextFiles;
+      setFiles(nextFiles);
+      toast.success(t("toasts.retryProcessingStarted"));
+      await refreshCurrentFiles();
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+      toast.error(t("toasts.retryProcessingFailed"), {
+        description: resolveErrorMessage(error, t("toasts.retryProcessingFailed")),
+      });
+      await refreshCurrentFiles();
+    } finally {
+      if (retryingFileIDRef.current === fileID) {
+        retryingFileIDRef.current = null;
+        if (isMountedRef.current) {
+          setRetryingFileID(null);
+        }
+      }
+    }
+  }, [ensureAccessToken, resolveErrorMessage, t]);
 
   const onDeleteFile = React.useCallback(
     async (fileID: string) => {
@@ -947,6 +1011,7 @@ export function useFilesPage(): UseFilesPageResult {
     loadingMore,
     uploading,
     deletingFileID,
+    retryingFileID,
     selectedFileIDs,
     bulkDeleteOpen,
     bulkDeleting,
@@ -990,6 +1055,7 @@ export function useFilesPage(): UseFilesPageResult {
     onClearBulkDelete,
     onConfirmBulkDelete,
     onVectorizeFile,
+    onRetryFileProcessing,
     onVectorizeSelected,
     onBackToList,
     onToggleRagOptOut,

@@ -938,18 +938,21 @@ func parsePaddleJSONL(body io.Reader, ranges []PageRange) (Response, error) {
 			}
 			return Response{}, fmt.Errorf("ocr_unprocessable: invalid PaddleOCR JSONL result: %w", err)
 		}
-		for _, item := range line.Result.LayoutParsingResults {
-			pageNumber++
-			if len(targetSet) > 0 {
-				if _, ok := targetSet[pageNumber]; !ok {
-					continue
-				}
-			}
-			text := normalizeOCRText(item.Markdown.Text)
-			if text == "" {
+		pageNumber++
+		if len(targetSet) > 0 {
+			if _, ok := targetSet[pageNumber]; !ok {
 				continue
 			}
-			pages = append(pages, PageText{PageNumber: pageNumber, Text: text})
+		}
+		var pageTexts []string
+		for _, item := range line.Result.LayoutParsingResults {
+			text := normalizeOCRText(item.Markdown.Text)
+			if text != "" {
+				pageTexts = append(pageTexts, text)
+			}
+		}
+		if len(pageTexts) > 0 {
+			pages = append(pages, PageText{PageNumber: pageNumber, Text: strings.Join(pageTexts, "\n\n")})
 		}
 	}
 	if len(pages) == 0 {

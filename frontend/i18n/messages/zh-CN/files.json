@@ -43,6 +43,7 @@
     "selectAll": "全选",
     "vectorize": "向量化",
     "updateIndex": "更新索引",
+    "retryProcessing": "重新处理",
     "loadMore": "下滑加载更多"
   },
   "selection": {
@@ -181,6 +182,8 @@
     "vectorizeLimit": "单次最多提交 100 个文件",
     "vectorizeFailed": "向量化任务提交失败",
     "vectorizePartial": "已提交 {submitted} 个文件，另有 {failed} 个文件暂时无法加入队列",
+    "retryProcessingStarted": "文件已重新提交处理",
+    "retryProcessingFailed": "文件重新处理失败",
     "previewLoadFailed": "文件预览加载失败",
     "previewProcessingFailed": "文件处理失败，暂时无法预览。",
     "previewProcessing": "文件正在处理中，稍后可预览。",

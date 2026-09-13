@@ -916,7 +916,7 @@ func isActiveUploadMIME(mimeType string) bool {
 
 func detectContentMIME(header []byte, declared string, fileName string) string {
 	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(fileName)))
-	if ext == ".mp3" && isLikelyMP3FrameHeader(header) {
+	if ext == ".mp3" && isLikelyMP3Header(header) {
 		return "audio/mpeg"
 	}
 	if ext == ".m4a" && isLikelyM4AHeader(header) {
@@ -926,6 +926,26 @@ func detectContentMIME(header []byte, declared string, fileName string) string {
 		return normalizeDetectedMIME(declared, fileName)
 	}
 	return normalizeDetectedMIME(http.DetectContentType(header), fileName)
+}
+
+func isLikelyMP3Header(header []byte) bool {
+	if isLikelyID3Header(header) {
+		return true
+	}
+	return isLikelyMP3FrameHeader(header)
+}
+
+func isLikelyID3Header(header []byte) bool {
+	if len(header) < 10 {
+		return false
+	}
+	if header[0] != 'I' || header[1] != 'D' || header[2] != '3' {
+		return false
+	}
+	if header[3] == 0xff || header[4] == 0xff {
+		return false
+	}
+	return header[6] < 0x80 && header[7] < 0x80 && header[8] < 0x80 && header[9] < 0x80
 }
 
 func isLikelyMP3FrameHeader(header []byte) bool {

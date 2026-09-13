@@ -179,6 +179,7 @@
   },
   "file": {
     "embeddingUnavailable": "当前文件暂不支持向量处理。",
+    "processingRetryNotAllowed": "当前文件处理状态不允许重试。",
     "extractNotReady": "文件解析尚未完成。",
     "invalidId": "文件 ID 无效。",
     "invalidName": "文件名无效。",

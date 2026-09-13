@@ -1,6 +1,6 @@
 "use client";
 
-import { DatabaseZap, Ellipsis, PencilLine, SquareCheckBig, Trash2, Zap } from "lucide-react";
+import { DatabaseZap, Ellipsis, PencilLine, RotateCcw, SquareCheckBig, Trash2, Zap } from "lucide-react";
 import { useTranslations } from "next-intl";
 import * as React from "react";
 import { AnimatedText } from "@/components/ui/animated-text";
@@ -31,6 +31,8 @@ type SidebarListProps = {
   loadingMore: boolean;
   hasMore: boolean;
   syncing: boolean;
+  retryingFileID: string | null;
+  retryingBusy: boolean;
   vectorizingFileIDs: string[];
   renamingFileID: string | null;
   renameValue: string;
@@ -41,6 +43,7 @@ type SidebarListProps = {
   onRenameValueChange: (value: string) => void;
   onRenameCommit: (fileID: string, currentFileName: string) => void;
   onRenameCancel: () => void;
+  onRetryProcessing: (fileID: string) => void;
   onVectorize: (fileID: string) => void;
   onDeleteRequest: (item: FileObjectDTO) => void;
 };
@@ -51,6 +54,8 @@ function SidebarListItem({
   checked,
   vectorizing,
   vectorizationBusy,
+  retrying,
+  retryingBusy,
   renaming,
   renameValue,
   onSelect,
@@ -59,6 +64,7 @@ function SidebarListItem({
   onRenameValueChange,
   onRenameCommit,
   onRenameCancel,
+  onRetryProcessing,
   onVectorize,
   onDeleteRequest,
 }: {
@@ -66,6 +72,8 @@ function SidebarListItem({
   selected: boolean;
   checked: boolean;
   vectorizing: boolean;
+  retrying: boolean;
+  retryingBusy: boolean;
   vectorizationBusy: boolean;
   renaming: boolean;
   renameValue: string;
@@ -75,6 +83,7 @@ function SidebarListItem({
   onRenameValueChange: (value: string) => void;
   onRenameCommit: (fileID: string, currentFileName: string) => void;
   onRenameCancel: () => void;
+  onRetryProcessing: (fileID: string) => void;
   onVectorize: (fileID: string) => void;
   onDeleteRequest: (item: FileObjectDTO) => void;
 }) {
@@ -82,6 +91,7 @@ function SidebarListItem({
   const fileIcon = resolveFileIcon(item);
   const showsRetrievalStatus = item.fileCategory !== "image" && item.embedStatus === "ready";
   const vectorizable = canManuallyVectorizeFile(item);
+  const retryable = item.fileCategory !== "audio" && item.processingStatus === "failed";
   const [actionsMenuOpen, setActionsMenuOpen] = React.useState(false);
 
   if (renaming) {
@@ -193,6 +203,19 @@ function SidebarListItem({
                 <DropdownMenuItemIcon icon={SquareCheckBig} />
                 {checked ? t("actions.cancelSelect") : t("actions.select")}
               </DropdownMenuItem>
+              {retryable ? (
+                <DropdownMenuItem
+                  disabled={retryingBusy}
+                  onSelect={() => onRetryProcessing(item.fileID)}
+                >
+                  {retrying ? (
+                    <Spinner className="size-4 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <DropdownMenuItemIcon icon={RotateCcw} />
+                  )}
+                  {t("actions.retryProcessing")}
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem
                 onSelect={(event) => {
                   event.preventDefault();
@@ -248,6 +271,8 @@ export function SidebarList({
   loadingMore,
   hasMore,
   syncing,
+  retryingFileID,
+  retryingBusy,
   vectorizingFileIDs,
   renamingFileID,
   renameValue,
@@ -258,6 +283,7 @@ export function SidebarList({
   onRenameValueChange,
   onRenameCommit,
   onRenameCancel,
+  onRetryProcessing,
   onVectorize,
   onDeleteRequest,
 }: SidebarListProps) {
@@ -311,6 +337,8 @@ export function SidebarList({
                   selected={isSelected}
                   checked={isChecked}
                   vectorizing={vectorizingFileIDSet.has(item.fileID)}
+                  retrying={retryingFileID === item.fileID}
+                  retryingBusy={retryingBusy}
                   vectorizationBusy={vectorizingFileIDs.length > 0}
                   renaming={isRenaming}
                   renameValue={renameValue}
@@ -320,6 +348,7 @@ export function SidebarList({
                   onRenameValueChange={onRenameValueChange}
                   onRenameCommit={onRenameCommit}
                   onRenameCancel={onRenameCancel}
+                  onRetryProcessing={onRetryProcessing}
                   onVectorize={onVectorize}
                   onDeleteRequest={onDeleteRequest}
                 />

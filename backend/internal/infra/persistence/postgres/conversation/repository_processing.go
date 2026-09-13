@@ -2,6 +2,8 @@ package conversation
 
 import (
 	"context"
+	"path/filepath"
+	"strings"
 	"time"
 
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
@@ -59,7 +61,7 @@ func (r *Repo) GetFileObjectProcessingByObjectID(ctx context.Context, fileObjID 
 	if err := r.db.WithContext(ctx).
 		Where("id = ?", fileObjID).
 		First(&item).Error; err != nil {
-		return nil, err
+		return nil, dberror.Translate(err)
 	}
 	result := toFileObjectProcessingStateDomain(item)
 	return &result, nil
@@ -84,61 +86,86 @@ func (r *Repo) ListRecoverableAudioFileObjects(ctx context.Context, limit int) (
 	return result, nil
 }
 
-func (r *Repo) CompareAndSwapTranscriptRevision(ctx context.Context, userID uint, fileID string, expectedRevision int) (bool, error) {
-	if userID == 0 || fileID == "" || expectedRevision < 1 {
-		return false, nil
+// PublishTranscriptRevision atomically publishes a newly written immutable
+// transcript revision and invalidates any embedding derived from the old one.
+func (r *Repo) PublishTranscriptRevision(
+	ctx context.Context,
+	userID uint,
+	fileID string,
+	input repository.PublishTranscriptRevisionInput,
+) (bool, error) {
+	fileID = strings.TrimSpace(fileID)
+	if userID == 0 || fileID == "" || input.ExpectedRevision < 1 {
+		return false, repository.ErrInvalidInput
 	}
-	const processingPayloadColumn = "processing_payload_json"
-	whereRevision := "COALESCE((processing_payload_json::jsonb ->> 'transcriptRevision')::int, 1) = ?"
-	updatedPayload := gorm.Expr(
-		"jsonb_set(COALESCE(NULLIF(processing_payload_json, ''), '{}')::jsonb, '{transcriptRevision}', to_jsonb(?::int), true)::text",
-		expectedRevision+1,
-	)
-	if r.sqliteDialect() {
-		whereRevision = "COALESCE(CAST(json_extract(processing_payload_json, '$.transcriptRevision') AS INTEGER), 1) = ?"
-		updatedPayload = gorm.Expr(
-			"json_set(CASE WHEN NULLIF(processing_payload_json, '') IS NULL THEN '{}' ELSE processing_payload_json END, '$.transcriptRevision', ?)",
-			expectedRevision+1,
-		)
+	if input.Revision <= 0 {
+		input.Revision = input.ExpectedRevision + 1
 	}
-	result := r.db.WithContext(ctx).
-		Model(&models.FileObject{}).
-		Where("user_id = ? AND file_id = ? AND status = ? AND file_category = ?", userID, fileID, "active", "audio").
-		Where(whereRevision, expectedRevision).
-		Updates(map[string]any{
-			processingPayloadColumn: updatedPayload,
-			"updated_at":            time.Now(),
-		})
-	if result.Error != nil {
-		return false, translateError(result.Error)
+	if input.Revision != input.ExpectedRevision+1 ||
+		strings.TrimSpace(input.TranscriptJSONPath) == "" ||
+		strings.TrimSpace(input.TranscriptMDPath) == "" {
+		return false, repository.ErrInvalidInput
 	}
-	return result.RowsAffected == 1, nil
-}
+	input.TranscriptJSONPath = filepath.ToSlash(strings.TrimSpace(input.TranscriptJSONPath))
+	input.TranscriptMDPath = filepath.ToSlash(strings.TrimSpace(input.TranscriptMDPath))
+	if input.ExtractChars < 0 {
+		input.ExtractChars = 0
+	}
 
-func (r *Repo) SetTranscriptRevisionIfExpected(ctx context.Context, userID uint, fileID string, expectedRevision int, targetRevision int) (bool, error) {
-	if userID == 0 || fileID == "" || expectedRevision < 1 || targetRevision < 1 {
-		return false, nil
-	}
-	const processingPayloadColumn = "processing_payload_json"
-	whereRevision := "COALESCE((processing_payload_json::jsonb ->> 'transcriptRevision')::int, 1) = ?"
+	whereRevision := "COALESCE((NULLIF(processing_payload_json, '')::jsonb ->> 'transcriptRevision')::int, 1) = ?"
 	updatedPayload := gorm.Expr(
-		"jsonb_set(COALESCE(NULLIF(processing_payload_json, ''), '{}')::jsonb, '{transcriptRevision}', to_jsonb(?::int), true)::text",
-		targetRevision,
+		`jsonb_set(
+			jsonb_set(
+				jsonb_set(
+					COALESCE(NULLIF(processing_payload_json, '')::jsonb, '{}'::jsonb),
+					'{transcriptRevision}', to_jsonb(?::int), true),
+				'{transcriptJSONPath}', to_jsonb(?::text), true),
+			'{transcriptMDPath}', to_jsonb(?::text), true)::text`,
+		input.Revision,
+		input.TranscriptJSONPath,
+		input.TranscriptMDPath,
 	)
 	if r.sqliteDialect() {
-		whereRevision = "COALESCE(CAST(json_extract(processing_payload_json, '$.transcriptRevision') AS INTEGER), 1) = ?"
+		whereRevision = "COALESCE(CAST(json_extract(CASE WHEN NULLIF(processing_payload_json, '') IS NULL THEN '{}' ELSE processing_payload_json END, '$.transcriptRevision') AS INTEGER), 1) = ?"
 		updatedPayload = gorm.Expr(
-			"json_set(CASE WHEN NULLIF(processing_payload_json, '') IS NULL THEN '{}' ELSE processing_payload_json END, '$.transcriptRevision', ?)",
-			targetRevision,
+			`json_set(
+				CASE WHEN NULLIF(processing_payload_json, '') IS NULL THEN '{}' ELSE processing_payload_json END,
+				'$.transcriptRevision', ?,
+				'$.transcriptJSONPath', ?,
+				'$.transcriptMDPath', ?)`,
+			input.Revision,
+			input.TranscriptJSONPath,
+			input.TranscriptMDPath,
 		)
 	}
+	const (
+		activeStatus           = "active"
+		audioCategory          = "audio"
+		staleStatus            = "stale"
+		embeddingStaleReason   = "embedding_stale"
+		embeddingPendingReason = "embedding_pending"
+		noneStatus             = "none"
+	)
 	result := r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
-		Where("user_id = ? AND file_id = ? AND status = ? AND file_category = ?", userID, fileID, "active", "audio").
-		Where(whereRevision, expectedRevision).
+		Where("user_id = ? AND file_id = ? AND status = ? AND file_category = ?", userID, fileID, activeStatus, audioCategory).
+		Where(whereRevision, input.ExpectedRevision).
 		Updates(map[string]any{
-			processingPayloadColumn: updatedPayload,
-			"updated_at":            time.Now(),
+			"processing_payload_json": updatedPayload,
+			"extract_storage_path":    input.TranscriptMDPath,
+			"extract_chars":           input.ExtractChars,
+			"preview_text":            input.PreviewText,
+			"rag_ready":               false,
+			"embed_status": gorm.Expr(
+				"CASE WHEN embed_status IN (?, ?, ?, ?) THEN ? ELSE embed_status END",
+				"queued", "processing", "ready", "failed", staleStatus,
+			),
+			"rag_reason": gorm.Expr(
+				"CASE WHEN embed_status = ? THEN ? ELSE ? END",
+				noneStatus, embeddingPendingReason, embeddingStaleReason,
+			),
+			"embed_error": "",
+			"updated_at":  time.Now(),
 		})
 	if result.Error != nil {
 		return false, translateError(result.Error)
@@ -253,16 +280,19 @@ func (r *Repo) TryClaimFileObjectProcessing(
 	now := time.Now()
 	result := r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
-		Where("user_id = ? AND file_id = ? AND processing_status IN ?", userID, fileID, claimableStatuses).
+		Where("user_id = ? AND file_id = ?", userID, fileID).
+		Where("(processing_status IN ? OR (file_category = ? AND processing_status = ?))", claimableStatuses, "audio", "transcribing").
 		Updates(map[string]any{
-			"processing_status":        "extracting",
+			"processing_status": gorm.Expr(
+				"CASE WHEN processing_status = 'transcribing' THEN 'transcribing' ELSE 'extracting' END",
+			),
 			"processing_ready":         false,
 			"processing_error_code":    "",
 			"processing_error_message": "",
 			"extract_status":           "processing",
 			"extractor_version":        extractorVersion,
 			"processing_attempt_id":    attemptID,
-			"processing_started_at":    now,
+			"processing_started_at":    gorm.Expr("COALESCE(processing_started_at, ?)", now),
 			"processing_completed_at":  nil,
 			"updated_at":               now,
 		})
@@ -289,12 +319,14 @@ func (r *Repo) ResetFileObjectProcessingForRetry(
 			[]string{"extracting", "embedding"},
 		).
 		Updates(map[string]any{
-			"processing_status":       "queued",
-			"processing_ready":        false,
-			"extract_status":          "none",
-			"processing_attempt_id":   "",
-			"processing_completed_at": nil,
-			"updated_at":              now,
+			"processing_status":        "queued",
+			"processing_ready":         false,
+			"processing_error_code":    "",
+			"processing_error_message": "",
+			"extract_status":           "none",
+			"processing_attempt_id":    "",
+			"processing_completed_at":  nil,
+			"updated_at":               now,
 		})
 	if result.Error != nil {
 		return false, dberror.Translate(result.Error)

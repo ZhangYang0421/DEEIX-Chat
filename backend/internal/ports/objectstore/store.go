@@ -15,6 +15,10 @@ var (
 	ErrNotFound = errors.New("object not found")
 	// ErrUnsupported 表示当前存储后端不支持该能力。
 	ErrUnsupported = errors.New("operation not supported")
+	// ErrAlreadyExists 表示条件写入发现目标对象已经存在。
+	ErrAlreadyExists = errors.New("object already exists")
+	// ErrContentMismatch 表示不可变对象已存在但内容不同。
+	ErrContentMismatch = errors.New("object content mismatch")
 )
 
 // PutOptions 描述写入对象时的元信息。
@@ -37,4 +41,10 @@ type Store interface {
 	Open(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, error)
 	Delete(ctx context.Context, key string) error
 	Materialize(ctx context.Context, key string) (string, func(), error)
+}
+
+// PutIfAbsentStore 提供不会覆盖已有对象的条件写入能力。
+// 该接口作为可选扩展，普通 Store 的 Put 仍保持原有覆盖语义。
+type PutIfAbsentStore interface {
+	PutIfAbsent(ctx context.Context, key string, body io.Reader, opts PutOptions) (ObjectInfo, error)
 }

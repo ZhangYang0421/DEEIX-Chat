@@ -42,7 +42,7 @@ func TestSQLiteVectorStoreSearchesFileAndMessageChunks(t *testing.T) {
 		{1, 0, 0},
 		{0, 1, 0},
 	}
-	if published, err := repo.ReplaceFileChunks(ctx, 10, embeddingSignature, fileChunks, fileEmbeddings); err != nil || !published {
+	if published, err := repo.ReplaceFileChunks(ctx, 10, embeddingSignature, fileChunks, fileEmbeddings, 0); err != nil || !published {
 		t.Fatalf("ReplaceFileChunks() error = %v", err)
 	}
 	fileResults, err := repo.SearchFileChunks(ctx, 1, []uint{10}, []float32{1, 0, 0}, embeddingSignature, 2)
@@ -55,7 +55,7 @@ func TestSQLiteVectorStoreSearchesFileAndMessageChunks(t *testing.T) {
 	otherOwnerChunks := []domainconversation.FileChunk{
 		{FileObjID: 11, UserID: 2, ChunkIndex: 0, Content: "shared knowledge target", TokenCount: 3, EmbeddingSignature: embeddingSignature},
 	}
-	if published, err := repo.ReplaceFileChunks(ctx, 11, embeddingSignature, otherOwnerChunks, [][]float32{{0.9, 0.1, 0}}); err != nil || !published {
+	if published, err := repo.ReplaceFileChunks(ctx, 11, embeddingSignature, otherOwnerChunks, [][]float32{{0.9, 0.1, 0}}, 0); err != nil || !published {
 		t.Fatalf("ReplaceFileChunks(other owner) error = %v", err)
 	}
 	builtinBase := model.KnowledgeBase{PublicID: "builtin", Scope: "builtin", Name: "Built in", Enabled: true}
@@ -68,7 +68,7 @@ func TestSQLiteVectorStoreSearchesFileAndMessageChunks(t *testing.T) {
 	privateChunks := []domainconversation.FileChunk{
 		{FileObjID: 12, UserID: 2, ChunkIndex: 0, Content: "private target", TokenCount: 2, EmbeddingSignature: embeddingSignature},
 	}
-	if published, err := repo.ReplaceFileChunks(ctx, 12, embeddingSignature, privateChunks, [][]float32{{1, 0, 0}}); err != nil || !published {
+	if published, err := repo.ReplaceFileChunks(ctx, 12, embeddingSignature, privateChunks, [][]float32{{1, 0, 0}}, 0); err != nil || !published {
 		t.Fatalf("ReplaceFileChunks(private other owner) error = %v", err)
 	}
 	sharedResults, err := repo.SearchFileChunks(ctx, 1, []uint{10, 11, 12, 10}, []float32{1, 0, 0}, embeddingSignature, 3)
@@ -258,7 +258,7 @@ func TestFileEmbeddingQueueStateAndProcessingProjection(t *testing.T) {
 		t.Fatalf("incomplete processing projection: %#v", status)
 	}
 
-	claimed, err := repo.ClaimFileEmbedding(ctx, 7, file.FileID, "model@1536")
+	claimed, err := repo.ClaimFileEmbedding(ctx, 7, file.FileID, "model@1536", 0)
 	if err != nil || !claimed {
 		t.Fatalf("claim queued embedding: claimed=%v err=%v", claimed, err)
 	}
@@ -276,33 +276,34 @@ func TestFileEmbeddingGenerationRejectsSupersededPublisher(t *testing.T) {
 	repo := NewRepo(db)
 	ctx := context.Background()
 	file := model.FileObject{
-		FileID:         "file_generation",
-		UserID:         1,
-		Status:         "active",
-		EmbedStatus:    "processing",
-		EmbedSignature: "space-4096",
+		FileID:                "file_generation",
+		UserID:                1,
+		FileCategory:          "audio",
+		Status:                "active",
+		EmbedStatus:           "processing",
+		EmbedSignature:        "space-4096",
+		ProcessingPayloadJSON: `{"transcriptRevision":2}`,
 	}
 	if err := db.Create(&file).Error; err != nil {
 		t.Fatalf("create file: %v", err)
 	}
 
-	claimed, err := repo.ClaimFileEmbedding(ctx, 1, file.FileID, "space-1536")
+	claimed, err := repo.ClaimFileEmbedding(ctx, 1, file.FileID, "space-1536", 2)
 	if err != nil || !claimed {
 		t.Fatalf("claim new vector space: claimed=%v err=%v", claimed, err)
 	}
 	oldChunks := []domainconversation.FileChunk{{FileObjID: file.ID, UserID: 1, Content: "old", EmbeddingSignature: "space-4096"}}
-	if published, publishErr := repo.ReplaceFileChunks(ctx, file.ID, "space-4096", oldChunks, [][]float32{{1, 0}}); publishErr != nil || published {
+	if published, publishErr := repo.ReplaceFileChunks(ctx, file.ID, "space-4096", oldChunks, [][]float32{{1, 0}}, 1); publishErr != nil || published {
 		t.Fatalf("superseded publisher must be rejected: published=%v err=%v", published, publishErr)
 	}
-	if updated, updateErr := repo.UpdateFileObjectEmbedStatus(ctx, 1, file.FileID, "space-4096", "ready", ""); updateErr != nil || updated {
+	if updated, updateErr := repo.UpdateFileObjectEmbedStatus(ctx, 1, file.FileID, "space-4096", "ready", "", 1); updateErr != nil || updated {
 		t.Fatalf("superseded status update must be rejected: updated=%v err=%v", updated, updateErr)
 	}
-
 	newChunks := []domainconversation.FileChunk{{FileObjID: file.ID, UserID: 1, Content: "new", EmbeddingSignature: "space-1536"}}
-	if published, publishErr := repo.ReplaceFileChunks(ctx, file.ID, "space-1536", newChunks, [][]float32{{0, 1}}); publishErr != nil || !published {
+	if published, publishErr := repo.ReplaceFileChunks(ctx, file.ID, "space-1536", newChunks, [][]float32{{0, 1}}, 2); publishErr != nil || !published {
 		t.Fatalf("current publisher must succeed: published=%v err=%v", published, publishErr)
 	}
-	if updated, updateErr := repo.UpdateFileObjectEmbedStatus(ctx, 1, file.FileID, "space-1536", "ready", ""); updateErr != nil || !updated {
+	if updated, updateErr := repo.UpdateFileObjectEmbedStatus(ctx, 1, file.FileID, "space-1536", "ready", "", 2); updateErr != nil || !updated {
 		t.Fatalf("current status update must succeed: updated=%v err=%v", updated, updateErr)
 	}
 
@@ -312,6 +313,49 @@ func TestFileEmbeddingGenerationRejectsSupersededPublisher(t *testing.T) {
 	}
 	if stored.Content != "new" || stored.EmbeddingSignature != "space-1536" {
 		t.Fatalf("unexpected stored chunk: %#v", stored)
+	}
+}
+
+func TestReplaceFileChunksGuardsTranscriptRevision(t *testing.T) {
+	db := openConversationSQLiteVectorTestDB(t)
+	repo := NewRepo(db)
+	ctx := context.Background()
+	const signature = "same-space"
+	file := model.FileObject{
+		FileID:                "file_transcript_guard",
+		UserID:                1,
+		FileCategory:          "audio",
+		Status:                "active",
+		EmbedStatus:           "processing",
+		EmbedSignature:        signature,
+		ProcessingPayloadJSON: `{"transcriptRevision":2}`,
+	}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatalf("create guarded file: %v", err)
+	}
+
+	staleChunks := []domainconversation.FileChunk{{FileObjID: file.ID, UserID: 1, Content: "revision one", EmbeddingSignature: signature}}
+	if published, err := repo.ReplaceFileChunks(ctx, file.ID, signature, staleChunks, [][]float32{{1, 0}}, 1); err != nil || published {
+		t.Fatalf("old transcript revision must be rejected: published=%v err=%v", published, err)
+	}
+	var count int64
+	if err := db.Model(&model.FileChunk{}).Where("file_obj_id = ?", file.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count chunks after rejected publication: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("rejected transcript revision published %d chunks", count)
+	}
+
+	currentChunks := []domainconversation.FileChunk{{FileObjID: file.ID, UserID: 1, Content: "revision two", EmbeddingSignature: signature}}
+	if published, err := repo.ReplaceFileChunks(ctx, file.ID, signature, currentChunks, [][]float32{{0, 1}}, 2); err != nil || !published {
+		t.Fatalf("current transcript revision must publish: published=%v err=%v", published, err)
+	}
+	var stored model.FileChunk
+	if err := db.Where("file_obj_id = ?", file.ID).Take(&stored).Error; err != nil {
+		t.Fatalf("load guarded chunk: %v", err)
+	}
+	if stored.Content != "revision two" {
+		t.Fatalf("guarded chunk content = %q, want current revision", stored.Content)
 	}
 }
 

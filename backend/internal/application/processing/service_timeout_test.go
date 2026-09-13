@@ -59,14 +59,6 @@ func (*processingStateRepositoryStub) ListRecoverableAudioFileObjects(context.Co
 	return nil, nil
 }
 
-func (*processingStateRepositoryStub) CompareAndSwapTranscriptRevision(context.Context, uint, string, int) (bool, error) {
-	return true, nil
-}
-
-func (*processingStateRepositoryStub) SetTranscriptRevisionIfExpected(context.Context, uint, string, int, int) (bool, error) {
-	return true, nil
-}
-
 func (*processingStateRepositoryStub) UpdateFileObjectProcessing(context.Context, uint, string, repository.UpdateFileObjectProcessingInput) error {
 	return nil
 }

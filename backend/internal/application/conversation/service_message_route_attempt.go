@@ -6,6 +6,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/textutil"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/llm"
 )
 
@@ -102,10 +103,60 @@ func (s *Service) buildMessageRoutePrompt(ctx context.Context, route *channel.Re
 		Config:            input.Config,
 		StoreProvider:     s.storeProvider,
 	})
-	if !llm.ModelAllowsInputModality(route.ModelCapabilitiesJSON, llm.ModelInputModalityImage) && promptMessagesContainImage(plan.Messages) {
-		return PromptPlan{}, ErrModelImageInputUnsupported
+	if !llm.ModelAllowsInputModality(route.ModelCapabilitiesJSON, llm.ModelInputModalityImage) {
+		if promptPlanContainsCurrentImage(plan.Messages, input.StableAttachments) {
+			return PromptPlan{}, ErrModelImageInputUnsupported
+		}
+		plan.Messages = downgradeHistoricalImagesToText(plan.Messages)
 	}
 	return plan, nil
+}
+
+func promptPlanContainsCurrentImage(messages []llm.Message, attachments []AttachmentInput) bool {
+	for _, att := range attachments {
+		if !att.Current {
+			continue
+		}
+		mime := textutil.FirstNonEmpty(att.DetectedMIME, att.MimeType)
+		if normalizeAttachmentKind(att.Kind, mime) == "image" {
+			return true
+		}
+	}
+	if len(messages) == 0 {
+		return false
+	}
+	lastMessage := messages[len(messages)-1]
+	if lastMessage.Role == "user" {
+		for _, part := range lastMessage.Parts {
+			if part.Kind == llm.ContentPartImage {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func downgradeHistoricalImagesToText(messages []llm.Message) []llm.Message {
+	result := make([]llm.Message, len(messages))
+	for i, message := range messages {
+		msg := message
+		if len(msg.Parts) > 0 {
+			newParts := make([]llm.ContentPart, len(msg.Parts))
+			for j, part := range msg.Parts {
+				if part.Kind == llm.ContentPartImage {
+					newParts[j] = llm.ContentPart{
+						Kind: llm.ContentPartText,
+						Text: "[历史图片附件]",
+					}
+				} else {
+					newParts[j] = part
+				}
+			}
+			msg.Parts = newParts
+		}
+		result[i] = msg
+	}
+	return result
 }
 
 func promptMessagesContainImage(messages []llm.Message) bool {

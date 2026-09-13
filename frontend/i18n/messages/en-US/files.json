@@ -43,6 +43,7 @@
     "selectAll": "Select all",
     "vectorize": "Vectorize",
     "updateIndex": "Update index",
+    "retryProcessing": "Retry processing",
     "loadMore": "Load more"
   },
   "selection": {
@@ -181,6 +182,8 @@
     "vectorizeLimit": "You can submit up to 100 files at a time",
     "vectorizeFailed": "Failed to submit vectorization jobs",
     "vectorizePartial": "Submitted {submitted} files; {failed} files could not be queued",
+    "retryProcessingStarted": "File processing retry started",
+    "retryProcessingFailed": "Failed to retry file processing",
     "previewLoadFailed": "Failed to load file preview",
     "previewProcessingFailed": "File processing failed. Preview is unavailable.",
     "previewProcessing": "File is still processing. Preview will be available later.",

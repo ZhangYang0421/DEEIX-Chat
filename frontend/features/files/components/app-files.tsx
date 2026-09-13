@@ -39,6 +39,7 @@ export function AppFiles() {
     loadingMore,
     uploading,
     deletingFileID,
+    retryingFileID,
     selectedFileIDs,
     bulkDeleteOpen,
     bulkDeleting,
@@ -81,6 +82,7 @@ export function AppFiles() {
     onBulkDeleteRequest,
     onClearBulkDelete,
     onConfirmBulkDelete,
+    onRetryFileProcessing,
     onVectorizeFile,
     onVectorizeSelected,
     onBackToList,
@@ -148,6 +150,8 @@ export function AppFiles() {
                 loadingMore={loadingMore}
                 hasMore={hasMore}
                 syncing={syncing}
+                retryingFileID={retryingFileID}
+                retryingBusy={retryingFileID !== null}
                 vectorizingFileIDs={vectorizingFileIDs}
                 renamingFileID={renamingFileID}
                 renameValue={renameValue}
@@ -159,6 +163,7 @@ export function AppFiles() {
                 onRenameCommit={onRenameCommit}
                 onRenameCancel={onRenameCancel}
                 onVectorize={(fileID) => void onVectorizeFile(fileID)}
+                onRetryProcessing={(fileID) => void onRetryFileProcessing(fileID)}
                 onDeleteRequest={onDeleteRequest}
               />
             ) : null}
@@ -174,12 +179,15 @@ export function AppFiles() {
             file={selectedFile}
             preview={preview}
             deleting={contentDeleting}
+            retrying={selectedFile ? retryingFileID === selectedFile.fileID : false}
+            retryingBusy={retryingFileID !== null}
             vectorizing={selectedFile ? vectorizingFileIDs.includes(selectedFile.fileID) : false}
             onBack={mobileView === "detail" ? onBackToList : undefined}
             onOpen={openPreview}
             onDownload={downloadPreview}
             onDeleteRequest={onDeleteRequest}
             onToggleRagOptOut={onToggleRagOptOut}
+            onRetryProcessing={onRetryFileProcessing}
             onVectorize={onVectorizeFile}
           />
           <ContentPreview

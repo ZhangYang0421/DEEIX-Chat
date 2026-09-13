@@ -265,6 +265,20 @@ export async function getFileProcessingStatuses(
   return (await Promise.all(requests)).flat();
 }
 
+export async function retryFileProcessing(
+  accessToken: string,
+  fileID: string,
+): Promise<{ fileID: string; processingStatus: string }> {
+  return authedRequest<{ fileID: string; processingStatus: string }>(
+    `/api/v1/files/${pathParam(fileID)}/processing/retry`,
+    {
+      method: "POST",
+      accessToken,
+    },
+    true,
+  );
+}
+
 export async function submitFileEmbeddings(
   accessToken: string,
   fileIDs: string[],
