@@ -17,6 +17,7 @@ import (
 	portfunasr "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/funasr"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/background"
 )
 
 const (
@@ -248,11 +249,7 @@ func cleanupTranscriptCandidates(ctx context.Context, store objectstore.Store, p
 	if store == nil {
 		return nil
 	}
-	baseCtx := ctx
-	if baseCtx == nil {
-		baseCtx = context.Background()
-	}
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(baseCtx), transcriptCandidateCleanupTimeout)
+	cleanupCtx, cancel := background.WithTimeout(ctx, transcriptCandidateCleanupTimeout)
 	defer cancel()
 	var cleanupErrs []error
 	for _, path := range paths {
