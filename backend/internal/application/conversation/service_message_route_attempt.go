@@ -158,14 +158,3 @@ func downgradeHistoricalImagesToText(messages []llm.Message) []llm.Message {
 	}
 	return result
 }
-
-func promptMessagesContainImage(messages []llm.Message) bool {
-	for _, message := range messages {
-		for _, part := range message.Parts {
-			if part.Kind == llm.ContentPartImage {
-				return true
-			}
-		}
-	}
-	return false
-}

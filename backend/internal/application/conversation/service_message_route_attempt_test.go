@@ -193,3 +193,14 @@ func TestWithMessageRouteReasoningPassbackOptions(t *testing.T) {
 		t.Fatalf("expected no option without historical reasoning, got %#v", withoutHistory)
 	}
 }
+
+func promptMessagesContainImage(messages []llm.Message) bool {
+	for _, message := range messages {
+		for _, part := range message.Parts {
+			if part.Kind == llm.ContentPartImage {
+				return true
+			}
+		}
+	}
+	return false
+}

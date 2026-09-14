@@ -112,7 +112,7 @@ export function TranscriptEditor({ fileID }: { fileID: string }) {
   const speakerEntries = React.useMemo(() => {
     if (!draft) return [];
     return Object.entries(draft.document.speakerNames).sort(([left], [right]) => left.localeCompare(right));
-  }, [draft?.document.speakerNames]);
+  }, [draft?.document.speakerNames, draft]);
 
   const effectiveSpeakerKeys = React.useMemo(() => {
     if (!draft) return new Set<string>();
@@ -120,7 +120,7 @@ export function TranscriptEditor({ fileID }: { fileID: string }) {
       const rawSpeakerKey = segment.speakerID == null ? "unknown" : String(segment.speakerID);
       return draft.document.speakerOverrides?.[segment.segmentID] ?? rawSpeakerKey;
     }));
-  }, [draft?.document.segments, draft?.document.speakerOverrides]);
+  }, [draft?.document.segments, draft?.document.speakerOverrides, draft]);
 
   const save = async () => {
     if (!saved || !draft) return;
