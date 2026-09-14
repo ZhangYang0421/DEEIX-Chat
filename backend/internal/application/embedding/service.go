@@ -344,7 +344,6 @@ func (s *Service) QueueTargetedJob(ctx context.Context, job TargetedJob) (bool, 
 	return s.repo.QueueFileEmbedding(ctx, job.UserID, job.FileID, job.EmbeddingSignature)
 }
 
-
 // ResolveFileVectorizationCapabilities 返回前端展示所需的后端事实状态。
 func (s *Service) ResolveFileVectorizationCapabilities(
 	ctx context.Context,
@@ -377,6 +376,7 @@ func (s *Service) ResolveFileVectorizationCapabilities(
 	}
 	return capabilities
 }
+
 // ProcessTargetedJob 执行从可恢复队列中领取的显式向量化任务。
 func (s *Service) ProcessTargetedJob(ctx context.Context, job TargetedJob) error {
 	if s == nil || s.repo == nil || strings.TrimSpace(job.FileID) == "" {

@@ -179,7 +179,7 @@ func TestSubmitFileEmbeddingsKeepsPerFileFailuresIsolated(t *testing.T) {
 func TestEmbeddingDeadLetterFinalizesFileStatus(t *testing.T) {
 	cfg := targetedEmbeddingTestConfig()
 	repo := &targetedEmbeddingRepositoryStub{
-		files: []domainconversation.FileObject{targetedEmbeddingTestFile("file_1")},
+		files:       []domainconversation.FileObject{targetedEmbeddingTestFile("file_1")},
 		vectorError: errors.New("vector store unavailable"),
 	}
 	queue := memorycache.New()

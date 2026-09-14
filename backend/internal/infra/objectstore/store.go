@@ -17,12 +17,12 @@ const (
 
 // 数据契约定义在 ports/objectstore，此处保留同名引用供实现使用。
 var (
-	ErrInvalidKey       = portobjectstore.ErrInvalidKey
-	ErrInvalidExpiry    = errors.New("invalid presign expiry")
-	ErrNotFound         = portobjectstore.ErrNotFound
-	ErrUnsupported      = portobjectstore.ErrUnsupported
-	ErrAlreadyExists    = portobjectstore.ErrAlreadyExists
-	ErrContentMismatch  = portobjectstore.ErrContentMismatch
+	ErrInvalidKey      = portobjectstore.ErrInvalidKey
+	ErrInvalidExpiry   = errors.New("invalid presign expiry")
+	ErrNotFound        = portobjectstore.ErrNotFound
+	ErrUnsupported     = portobjectstore.ErrUnsupported
+	ErrAlreadyExists   = portobjectstore.ErrAlreadyExists
+	ErrContentMismatch = portobjectstore.ErrContentMismatch
 )
 
 type (

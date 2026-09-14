@@ -2608,7 +2608,7 @@ func buildSingleFileKindWhereClause(filterKind string) (string, []any) {
 	case "pdf":
 		return "(LOWER(mime_type) = ? OR LOWER(file_name) LIKE ?)", []any{"application/pdf", "%.pdf"}
 	case "spreadsheet":
-		return "(" + strings.Join([]string{
+		conditions := []string{
 			"LOWER(mime_type) LIKE ?",
 			"LOWER(mime_type) LIKE ?",
 			"LOWER(mime_type) LIKE ?",
@@ -2616,7 +2616,8 @@ func buildSingleFileKindWhereClause(filterKind string) (string, []any) {
 			"LOWER(file_name) LIKE ?",
 			"LOWER(file_name) LIKE ?",
 			"LOWER(file_name) LIKE ?",
-		}, " OR ") + ")", []any{
+		}
+		args := []any{
 			"%spreadsheet%",
 			"%excel%",
 			"%csv%",
@@ -2625,22 +2626,25 @@ func buildSingleFileKindWhereClause(filterKind string) (string, []any) {
 			"%.csv",
 			"%.ods",
 		}
+		return "(" + strings.Join(conditions, " OR ") + ")", args
 	case "presentation":
-		return "(" + strings.Join([]string{
+		conditions := []string{
 			"LOWER(mime_type) LIKE ?",
 			"LOWER(mime_type) LIKE ?",
 			"LOWER(file_name) LIKE ?",
 			"LOWER(file_name) LIKE ?",
 			"LOWER(file_name) LIKE ?",
-		}, " OR ") + ")", []any{
+		}
+		args := []any{
 			"%presentation%",
 			"%powerpoint%",
 			"%.ppt",
 			"%.pptx",
 			"%.odp",
 		}
+		return "(" + strings.Join(conditions, " OR ") + ")", args
 	case "document":
-		return "(" + strings.Join([]string{
+		conditions := []string{
 			"LOWER(mime_type) LIKE ?",
 			"LOWER(mime_type) LIKE ?",
 			"LOWER(mime_type) LIKE ?",
@@ -2649,7 +2653,8 @@ func buildSingleFileKindWhereClause(filterKind string) (string, []any) {
 			"LOWER(file_name) LIKE ?",
 			"LOWER(file_name) LIKE ?",
 			"LOWER(file_name) LIKE ?",
-		}, " OR ") + ")", []any{
+		}
+		args := []any{
 			"%word%",
 			"%rtf%",
 			"%opendocument.text%",
@@ -2659,8 +2664,9 @@ func buildSingleFileKindWhereClause(filterKind string) (string, []any) {
 			"%.odt",
 			"%.pages",
 		}
+		return "(" + strings.Join(conditions, " OR ") + ")", args
 	case "code":
-		return "(" + strings.Join([]string{
+		conditions := []string{
 			"LOWER(mime_type) LIKE ?",
 			"LOWER(mime_type) LIKE ?",
 			"LOWER(mime_type) LIKE ?",
@@ -2687,7 +2693,8 @@ func buildSingleFileKindWhereClause(filterKind string) (string, []any) {
 			"LOWER(file_name) LIKE ?",
 			"LOWER(file_name) LIKE ?",
 			"LOWER(file_name) LIKE ?",
-		}, " OR ") + ")", []any{
+		}
+		args := []any{
 			"text/%",
 			"%json%",
 			"%javascript%",
@@ -2715,6 +2722,7 @@ func buildSingleFileKindWhereClause(filterKind string) (string, []any) {
 			"%.sh",
 			"%.py",
 		}
+		return "(" + strings.Join(conditions, " OR ") + ")", args
 	default:
 		return "", nil
 	}
