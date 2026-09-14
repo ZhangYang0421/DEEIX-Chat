@@ -1027,6 +1027,7 @@ html[data-branding-pending] body {
   .data-table-header {
     --data-table-header-bg: var(--accent);
     background-color: var(--data-table-header-bg);
+    box-shadow: 0 -1px 0 0 var(--data-table-header-bg);
   }
 
   .data-table-sticky-end-head {

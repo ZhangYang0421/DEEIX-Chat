@@ -646,12 +646,12 @@ export function ChatArea({
             <LiveMessageFollower activeKey={liveUserScrollKey} />
             <MessageScrollerViewport
               ref={messageViewportBoundaryRef}
-              className="px-3 pb-8 pt-2 md:px-6"
+              className="px-3 pt-2 has-data-[screenshot-capturing=true]:pb-8 md:px-6"
               onScroll={onScroll}
             >
               <MessageScrollerContent
                 ref={messageContentRef}
-                className={cn("mx-auto w-full gap-0", contentWidthClassName)}
+                className={cn("mx-auto w-full gap-0 pb-8 data-[screenshot-capturing=true]:pb-0", contentWidthClassName)}
                 style={{ fontFamily: "var(--font-chat)", fontWeight: "var(--font-chat-weight)" }}
               >
                 <ChatScreenshotBrandMark placement="top" />
