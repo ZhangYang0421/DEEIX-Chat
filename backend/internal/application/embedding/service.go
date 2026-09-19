@@ -130,7 +130,7 @@ type Service struct {
 	logger      *zap.Logger
 	funASRCodec portfunasr.Codec
 	workSlots   chan struct{}
-	reindexJobs chan string
+	reindexJobs chan reindexJob
 	reindexMu   sync.Mutex
 	reindexing  bool
 
@@ -153,7 +153,7 @@ func NewServiceWithRuntime(cfg *config.Runtime, repo repository.EmbeddingReposit
 		embedClient: embedClient,
 		logger:      logger,
 		workSlots:   make(chan struct{}, WorkerConcurrency),
-		reindexJobs: make(chan string, 1),
+		reindexJobs: make(chan reindexJob, 1),
 	}
 }
 
@@ -174,8 +174,8 @@ func (s *Service) StartBackgroundWorkers(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				return
-			case signature := <-s.reindexJobs:
-				s.runReindex(ctx, signature)
+			case job := <-s.reindexJobs:
+				s.runReindex(ctx, job)
 			}
 		}
 	})
@@ -546,12 +546,14 @@ func (s *Service) ProcessFile(ctx context.Context, fileObj domainconversation.Fi
 func (s *Service) processClaimedFile(ctx context.Context, fileObj domainconversation.FileObject, cfg config.Config, embeddingSignature string, expectedTranscriptRevision int) error {
 	chunks, err := s.chunksForFile(ctx, fileObj, cfg)
 	if err != nil {
+		if errors.Is(err, errNoExtractableText) || extraction.IsEmptyContent(err) {
+			return s.markFileEmpty(ctx, fileObj, embeddingSignature, expectedTranscriptRevision)
+		}
 		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, "failed", err, expectedTranscriptRevision)
 		return err
 	}
 	if len(chunks) == 0 {
-		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, "failed", errNoExtractableText, expectedTranscriptRevision)
-		return fmt.Errorf("%w %s", errNoExtractableText, fileObj.FileID)
+		return s.markFileEmpty(ctx, fileObj, embeddingSignature, expectedTranscriptRevision)
 	}
 
 	embeddings, err := s.embedTextsWithConfig(ctx, chunks, cfg)
@@ -644,6 +646,11 @@ func (s *Service) embeddingConfigurationCurrent(expectedSignature string, expect
 		strings.TrimRight(strings.TrimSpace(cfg.EmbeddingHost), "/") == strings.TrimRight(strings.TrimSpace(expectedHost), "/")
 }
 
+// markFileEmpty 将无文本文件记为终态 empty。这不是失败，不向调用方返回错误。
+func (s *Service) markFileEmpty(ctx context.Context, fileObj domainconversation.FileObject, embeddingSignature string, expectedTranscriptRevision int) error {
+	return s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, embeddingSignature, domainconversation.FileSubprocessStatusEmpty, errNoExtractableText, expectedTranscriptRevision)
+}
+
 func (s *Service) updateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, embeddingSignature string, status string, embedErr error, expectedTranscriptRevision int) error {
 	if s == nil || s.repo == nil {
 		return nil
@@ -672,7 +679,7 @@ func (s *Service) WaitReady(ctx context.Context, userID uint, fileID string, tim
 		if fo.EmbedStatus == "ready" {
 			return true
 		}
-		if fo.EmbedStatus == "failed" {
+		if fo.EmbedStatus == "failed" || fo.EmbedStatus == domainconversation.FileSubprocessStatusEmpty {
 			return false
 		}
 		select {
@@ -712,14 +719,19 @@ func (s *Service) chunksForFile(ctx context.Context, fileObj domainconversation.
 		return nil, err
 	}
 	if strings.TrimSpace(text) == "" {
-		return nil, fmt.Errorf("no extractable text in file %s", fileObj.FileID)
+		return nil, errNoExtractableText
 	}
 	return embeddingutil.ChunkText(text, cfg.EmbedChunkSizeTokens, cfg.EmbedChunkOverlapTokens), nil
 }
 
+// loadSourceText 返回文件文本。处理流水线已判定为空的文件直接返回 errNoExtractableText，
+// 不再重新提取或 OCR。
 func (s *Service) loadSourceText(ctx context.Context, fileObj domainconversation.FileObject) (string, error) {
 	if s != nil && s.repo != nil {
 		if result, err := s.repo.GetFileObjectProcessingByObjectID(ctx, fileObj.ID); err == nil && result != nil {
+			if result.ExtractStatus == domainconversation.FileSubprocessStatusEmpty {
+				return "", errNoExtractableText
+			}
 			if path := strings.TrimSpace(result.ExtractStoragePath); path != "" && s.extractSvc != nil {
 				text, readErr := s.extractSvc.ReadExtractedText(ctx, path)
 				if readErr == nil && strings.TrimSpace(text) != "" {
@@ -798,6 +810,7 @@ func (s *Service) embedTextsWithConfig(ctx context.Context, texts []string, cfg 
 			Model:          model,
 			Texts:          texts[start:end],
 			Dimensions:     cfg.EmbeddingOutputDimensions,
+			OmitDimensions: cfg.EmbeddingDimensionsPolicy == config.EmbeddingDimensionsPolicyOmit,
 			TimeoutSeconds: cfg.EmbeddingTimeoutSeconds,
 		})
 		if batchErr != nil {
@@ -831,6 +844,7 @@ type EmbeddingIndexStatus struct {
 	StaleCount     int64
 	PendingCount   int64
 	FailedCount    int64
+	EmptyCount     int64
 	NeedsReindex   bool
 }
 
@@ -876,6 +890,9 @@ func (s *Service) GetIndexStatus(ctx context.Context) (EmbeddingIndexStatus, err
 	if status.FailedCount, err = s.repo.CountFilesByEmbedStatus(ctx, "failed"); err != nil {
 		return status, err
 	}
+	if status.EmptyCount, err = s.repo.CountFilesByEmbedStatus(ctx, domainconversation.FileSubprocessStatusEmpty); err != nil {
+		return status, err
+	}
 	noneCount, _ := s.repo.CountFilesByEmbedStatus(ctx, "none")
 	queuedCount, _ := s.repo.CountFilesByEmbedStatus(ctx, "queued")
 	processingCount, _ := s.repo.CountFilesByEmbedStatus(ctx, "processing")
@@ -903,7 +920,8 @@ func (s *Service) ReconcileIndex(ctx context.Context) (int64, error) {
 
 // ReindexStaleFiles 提交一次去重的后台重建任务，返回本次纳入重建的文件数。
 // 后台任务通过固定 worker 数执行，不会按文件数量无限创建 goroutine。
-func (s *Service) ReindexStaleFiles(ctx context.Context) (int, error) {
+// includeEmpty 为 true 时把 empty 终态文件也重新纳入，供更换 OCR 引擎后强制重试。
+func (s *Service) ReindexStaleFiles(ctx context.Context, includeEmpty bool) (int, error) {
 	if s.repo == nil {
 		return 0, nil
 	}
@@ -937,7 +955,7 @@ func (s *Service) ReindexStaleFiles(ctx context.Context) (int, error) {
 	submitted := 0
 	var afterID uint
 	for {
-		files, err := s.repo.ListFilesForReindex(ctx, pageSize, afterID)
+		files, err := s.repo.ListFilesForReindex(ctx, pageSize, afterID, includeEmpty)
 		if err != nil {
 			return submitted, err
 		}
@@ -960,11 +978,17 @@ func (s *Service) ReindexStaleFiles(ctx context.Context) (int, error) {
 
 	started = true
 	// reindexing 标记保证同一时刻至多一个待执行任务，缓冲为 1 的通道不会阻塞。
-	s.reindexJobs <- configuredModelSignature(cfg)
+	s.reindexJobs <- reindexJob{signature: configuredModelSignature(cfg), includeEmpty: includeEmpty}
 	return submitted, nil
 }
 
-func (s *Service) runReindex(ctx context.Context, expectedSignature string) {
+type reindexJob struct {
+	signature    string
+	includeEmpty bool
+}
+
+func (s *Service) runReindex(ctx context.Context, job reindexJob) {
+	expectedSignature := job.signature
 	defer func() {
 		s.reindexMu.Lock()
 		s.reindexing = false
@@ -996,7 +1020,7 @@ func (s *Service) runReindex(ctx context.Context, expectedSignature string) {
 	var afterID uint
 scan:
 	for ctx.Err() == nil && configuredModelSignature(s.snapshot()) == expectedSignature {
-		files, err := s.repo.ListFilesForReindex(ctx, pageSize, afterID)
+		files, err := s.repo.ListFilesForReindex(ctx, pageSize, afterID, job.includeEmpty)
 		if err != nil {
 			if s.logger != nil {
 				s.logger.Warn("embedding_reindex_list_failed", zap.Error(err))

@@ -1410,6 +1410,32 @@ export interface EmailVerificationStartResponseDoc {
   errorMsg: string;
 }
 
+export interface EmbeddingIndexStatusResponse {
+  /** EmptyCount 是提取完成但无文本的文件数；这些文件不参与自动重建。 */
+  emptyCount: number;
+  failedCount: number;
+  modelSignature: string;
+  needsReindex: boolean;
+  pendingCount: number;
+  readyCount: number;
+  staleCount: number;
+}
+
+export interface EmbeddingIndexStatusResponseDoc {
+  data: EmbeddingIndexStatusResponse;
+  errorMsg: string;
+}
+
+export interface EmbeddingReindexResponse {
+  message: string;
+  submitted: number;
+}
+
+export interface EmbeddingReindexResponseDoc {
+  data: EmbeddingReindexResponse;
+  errorMsg: string;
+}
+
 export interface Envelope {
   data: any;
   details?: any;
@@ -1920,6 +1946,16 @@ export interface MessageBillingCostResponse {
   billedUSD: number;
   billingMode: string;
   pricingSnapshotJSON: string;
+}
+
+export interface MessageDeleteResponse {
+  deleted: boolean;
+  reparentedMessageCount: number;
+}
+
+export interface MessageDeleteResponseDoc {
+  data: MessageDeleteResponse;
+  errorMsg: string;
 }
 
 export interface MessageFeedbackResponse {
@@ -6966,7 +7002,7 @@ export namespace Admin {
   }
 
   /**
-   * No description
+   * @description include_empty=true 时同时重试提取无文本的 empty 文件，适用于更换 OCR 引擎后
    * @tags admin/settings
    * @name SettingsEmbeddingReindexCreate
    * @summary 触发向量重建（重索引所有 stale/failed 文件）
@@ -6975,10 +7011,13 @@ export namespace Admin {
    */
   export namespace SettingsEmbeddingReindexCreate {
     export type RequestParams = {};
-    export type RequestQuery = {};
+    export type RequestQuery = {
+      /** 是否包含 empty 终态文件 */
+      include_empty?: boolean;
+    };
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = Envelope;
+    export type ResponseBody = EmbeddingReindexResponseDoc;
   }
 
   /**
@@ -7010,7 +7049,7 @@ export namespace Admin {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = Envelope;
+    export type ResponseBody = EmbeddingIndexStatusResponseDoc;
   }
 
   /**
@@ -8582,6 +8621,27 @@ export namespace Conversations {
     export type RequestBody = SendMessageRequest;
     export type RequestHeaders = {};
     export type ResponseBody = string;
+  }
+
+  /**
+   * @description 删除会话中任意位置的一条消息；其子消息将重接到被删消息的父消息上，后续消息保留并向前衔接。会话第一条消息与生成中的消息不允许删除
+   * @tags chat
+   * @name MessagesDelete
+   * @summary 删除指定消息
+   * @request DELETE:/conversations/{id}/messages/{message_id}
+   * @secure
+   */
+  export namespace MessagesDelete {
+    export type RequestParams = {
+      /** 会话 public_id */
+      id: string;
+      /** 消息 public_id */
+      messageId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = MessageDeleteResponseDoc;
   }
 
   /**

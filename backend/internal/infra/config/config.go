@@ -58,6 +58,11 @@ const (
 	DefaultMCPMaxSelectedToolsPerMessage = 32
 	// MaxMCPSelectedToolsPerMessage 是运行时配置允许的安全上限，防止一次请求暴露过多工具 schema。
 	MaxMCPSelectedToolsPerMessage = 128
+
+	// EmbeddingDimensionsPolicySend 在 Embedding 请求中携带 dimensions 参数。
+	EmbeddingDimensionsPolicySend = "send"
+	// EmbeddingDimensionsPolicyOmit 省略 dimensions 参数，返回向量仍按 EmbeddingOutputDimensions 校验。
+	EmbeddingDimensionsPolicyOmit = "omit"
 )
 
 // DefaultModelOptionAllowedPathsJSON 返回用户可透传模型参数的默认白名单。
@@ -81,25 +86,11 @@ func DefaultModelOptionAllowedPathsJSON() string {
     "thinking.type",
     "stream_options.include_usage"
   ],
-  "openrouter_chat_completions": [
-    "presence_penalty",
-    "frequency_penalty",
-    "reasoning_effort",
-    "reasoning.effort",
-    "reasoning.summary",
-    "verbosity",
-    "thinking.type",
-    "stream_options.include_usage"
-  ],
   "openai_responses": [
     "service_tier",
     "reasoning.effort",
     "reasoning.summary",
     "text.verbosity"
-  ],
-  "openrouter_responses": [
-    "reasoning.effort",
-    "reasoning.summary"
   ],
   "openai_image_generations": [
     "background",
@@ -184,6 +175,37 @@ func DefaultModelOptionAllowedPathsJSON() string {
   ],
   "xai_video_extensions": [
     "duration"
+  ],
+  "openrouter_chat_completions": [
+    "presence_penalty",
+    "frequency_penalty",
+    "reasoning_effort",
+    "reasoning.effort",
+    "reasoning.summary",
+    "verbosity",
+    "thinking.type",
+    "stream_options.include_usage"
+  ],
+  "openrouter_responses": [
+    "reasoning.effort",
+    "reasoning.summary"
+  ],
+  "openrouter_images": [
+    "aspect_ratio",
+    "background",
+    "n",
+    "output_compression",
+    "output_format",
+    "provider.allow_fallbacks",
+    "provider.ignore",
+    "provider.only",
+    "provider.order",
+    "provider.sort",
+    "quality",
+    "resolution",
+    "seed",
+    "size",
+    "user"
   ]
 }`
 }
@@ -509,6 +531,7 @@ type Config struct {
 	EmbeddingKey                      string // Embedding HTTP 服务鉴权 Key，可选
 	EmbeddingTimeoutSeconds           int    // Embedding 请求超时（秒）
 	EmbeddingOutputDimensions         int    // 写库/检索统一输出维度
+	EmbeddingDimensionsPolicy         string // Embedding 请求 dimensions 参数策略
 	EmbeddingNormalize                bool   // 是否做归一化
 	EmbeddingModelSignature           string // 当前生效的模型签名（派生值，由 settings 变更时自动更新）
 	EmbedTriggerOnUpload              bool   // 上传后是否异步触发 embedding
@@ -750,6 +773,7 @@ func Load() Config {
 		EmbeddingKey:                      "",
 		EmbeddingTimeoutSeconds:           60,
 		EmbeddingOutputDimensions:         1536,
+		EmbeddingDimensionsPolicy:         EmbeddingDimensionsPolicySend,
 		EmbeddingNormalize:                true,
 		EmbedTriggerOnUpload:              true,
 		EmbedChunkSizeTokens:              1024,
