@@ -21,8 +21,9 @@ if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(version)) {
 const mismatches = [];
 
 function writeIfChanged(filePath, nextContent) {
-  const current = readFileSync(filePath, "utf8");
-  if (current === nextContent) {
+  const current = readFileSync(filePath, "utf8").replace(/\r\n/gu, "\n");
+  const normalizedNext = nextContent.replace(/\r\n/gu, "\n");
+  if (current === normalizedNext) {
     return;
   }
   mismatches.push(filePath);
